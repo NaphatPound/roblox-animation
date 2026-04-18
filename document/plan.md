@@ -54,10 +54,15 @@ This plan outlines the development phases and specific tasks required to build t
 - [x] Implement Inverse Kinematics (IK) for limbs — one-bone R6 IK assist (arms, legs, head-look) with reach clamping + torso translation compensation; FK/IK mode toggle, `Bake IK` writes the solved pose to the current keyframe, `Mirror Pose` swaps L↔R across the sagittal plane. See `lib/rig/`.
 - [x] Add Undo/Redo support — 50-snapshot history stack wraps every pose-mutating action (addKeyframe, removeKeyframe, moveKeyframe, updatePartRotation/Position, setTotalFrames, clearKeyframes, bakeIK, mirror); Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y shortcuts; toolbar buttons.
 
+## 🚀 Phase 7: Ecosystem & Continuity
+- [ ] Implement Roblox `KeyframeSequence` XML export (`.rbxmx`).
+- [ ] Add project persistence using `localStorage`.
+- [ ] Upgrade AI Text-to-Animation to support multi-frame sequences.
+- [ ] Implement temporal smoothing for batch image imports.
+
 ---
 
 ## 🛠️ Immediate Tasks (Next Steps)
-1. ~~Implement Inverse Kinematics (IK)~~ — done.
-2. ~~Add Undo/Redo~~ — done.
-3. Enhance Export/Import to support Roblox KeyframeSequence XML format (current export is a custom JSON clip; Roblox Studio import would need XML-serialised KeyframeSequence).
-4. Optional: viewport IK effector gizmos (task01 Phase 3). V1 uses numeric inputs + the existing rotate/translate gizmos on body parts.
+1. **Roblox XML Export:** Create a utility to serialize the current `AnimationClip` into a Roblox-compatible `.rbxmx` file.
+2. **Project Persistence:** Ensure user work survives a page refresh by syncing the Zustand store to `localStorage`.
+3. **AI Sequence Logic:** Update `generatePoseFromText` to prompt for and parse a list of keyframes rather than a single pose.

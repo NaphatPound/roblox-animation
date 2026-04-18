@@ -457,4 +457,4 @@ This file tracks features, bugs, fixes, and updates to the Roblox R6 AI Animator
 - Root cause: `interpolatePose` in `components/3d/InterpolationEngine.ts` only LERPed `position` when **both** keyframes had one, and otherwise fell back to `from.position || to.position` — a pure snap, not a blend. That is fine when both keyframes set a value, but falls over once the user uses the Move gizmo only on one keyframe (which is the normal case: the initial keyframe has no `position` set, the user adds one at frame 30).
 - Fix: if **either** side has a position, treat the missing side as `{x:0, y:0, z:0}` and LERP. Preserves `position = undefined` only when neither keyframe sets one (so default rigging still skips the field on export).
 - Regression tests added in `__tests__/InterpolationEngine.test.ts`: LERPs from zero when only one side has position (the reported bug), still LERPs when both sides have position, and keeps `position` undefined when neither side sets it.
-- Tests: 114 passing.
+- Verified in Chrome: moving the torso at frame 30 and leaving frame 0 at (0,0,0) now produces a smooth upward slide instead of a snap.
