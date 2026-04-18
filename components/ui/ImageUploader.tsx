@@ -11,16 +11,22 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 import { useAnimationStore } from '@/store/useAnimationStore';
-import { planImportFrames } from '@/lib/imageImport';
-import type { AIPoseResult, AISource } from '@/types';
+import {
+  planImportFrames,
+  runImportBatch,
+  summariseSources,
+  type BatchSource,
+} from '@/lib/imageImport';
+import type { AIPoseResult } from '@/types';
 
 export function ImageUploader() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [files, setFiles] = useState<File[]>([]);
+  const [visionPrompt, setVisionPrompt] = useState('');
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [lastSource, setLastSource] = useState<AISource | null>(null);
+  const [batchSource, setBatchSource] = useState<BatchSource | null>(null);
   const { addKeyframe, totalFrames, setTotalFrames, fps, currentFrame } =
     useAnimationStore();
 
@@ -50,42 +56,87 @@ export function ImageUploader() {
     if (files.length === 0) return;
     setLoading(true);
     setError(null);
-    setLastSource(null);
+    setBatchSource(null);
     setProgress(0);
 
     try {
       const plan = planImportFrames(files.length, currentFrame, fps);
-      if (plan.lastFrame > totalFrames) {
-        setTotalFrames(plan.lastFrame);
-      }
-      let sawSource: AISource | null = null;
-      for (let i = 0; i < files.length; i++) {
-        const base64 = await fileToBase64(files[i]);
+      const trimmedPrompt = visionPrompt.trim();
+
+      const analyze = async (
+        index: number,
+        hint: 'local' | undefined
+      ): Promise<AIPoseResult> => {
+        const base64 = await fileToBase64(files[index]);
         const res = await fetch('/api/ai-vision', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ imageBase64: base64 }),
+          body: JSON.stringify({
+            imageBase64: base64,
+            ...(trimmedPrompt ? { prompt: trimmedPrompt } : {}),
+            ...(hint ? { backend: hint } : {}),
+          }),
         });
         const data = (await res.json()) as AIPoseResult & { error?: string };
-        // Abort the batch on any non-200 (e.g. 502 when the upstream AI
-        // failed). This is the fix for report03 #1: we must never silently
-        // import fallback poses as if they were real vision output.
-        if (!res.ok || data.source === 'fallback') {
-          throw new Error(
-            data.error ||
-              `Vision analysis failed on frame ${i + 1} (HTTP ${res.status})`
-          );
+        if (!res.ok) {
+          // Flag as a fallback so the pure batch runner aborts.
+          return {
+            ...data,
+            source: 'fallback',
+            error:
+              data.error ||
+              `Vision analysis failed on frame ${index + 1} (HTTP ${res.status})`,
+          };
         }
-        addKeyframe(plan.frames[i], data.pose);
-        sawSource = data.source;
-        setProgress(Math.round(((i + 1) / files.length) * 100));
+        return data;
+      };
+
+      // runImportBatch stages keyframes locally and only returns them
+      // if every frame succeeded (report04 #1 — atomic commit).
+      const batch = await runImportBatch(plan, analyze, setProgress);
+
+      if (batch.lastFrame > totalFrames) {
+        setTotalFrames(batch.lastFrame);
       }
-      setLastSource(sawSource);
+      for (const kf of batch.keyframes) {
+        addKeyframe(kf.frame, kf.pose);
+      }
+      setBatchSource(summariseSources(batch.sources));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
       setLoading(false);
     }
+  };
+
+  const renderSource = (s: BatchSource) => {
+    if (s === 'cloud') {
+      return (
+        <>
+          <Cloud size={10} /> via Ollama Cloud
+        </>
+      );
+    }
+    if (s === 'local') {
+      return (
+        <>
+          <Server size={10} /> via local Ollama
+        </>
+      );
+    }
+    if (s === 'mixed') {
+      return (
+        <>
+          <Cloud size={10} />
+          <Server size={10} /> mixed (cloud + local)
+        </>
+      );
+    }
+    return (
+      <>
+        <AlertTriangle size={10} className="text-yellow-500" /> fallback
+      </>
+    );
   };
 
   return (
@@ -129,6 +180,14 @@ export function ImageUploader() {
         </div>
       )}
 
+      <textarea
+        value={visionPrompt}
+        onChange={(e) => setVisionPrompt(e.target.value)}
+        placeholder="Optional guidance (e.g. 'right-handed boxing stance, camera is mirrored')"
+        rows={2}
+        className="px-3 py-2 bg-[#0a0a0a] border border-[#333] rounded text-white text-xs resize-none focus:outline-none focus:border-purple-500"
+      />
+
       <button
         onClick={handleAnalyze}
         disabled={loading || files.length === 0}
@@ -137,21 +196,9 @@ export function ImageUploader() {
         {loading ? <Loader2 size={14} className="animate-spin" /> : <ImageIcon size={14} />}
         {loading ? `Analyzing... ${progress}%` : `Analyze ${files.length} frame(s)`}
       </button>
-      {lastSource && !error && (
+      {batchSource && !error && (
         <p className="text-xs text-gray-500 flex items-center gap-1">
-          {lastSource === 'cloud' ? (
-            <>
-              <Cloud size={10} /> via Ollama Cloud
-            </>
-          ) : lastSource === 'local' ? (
-            <>
-              <Server size={10} /> via local Ollama
-            </>
-          ) : (
-            <>
-              <AlertTriangle size={10} className="text-yellow-500" /> fallback
-            </>
-          )}
+          {renderSource(batchSource)}
         </p>
       )}
       {error && (

@@ -294,6 +294,38 @@ This file tracks features, bugs, fixes, and updates to the Roblox R6 AI Animator
   - `POST /api/ai-text {prompt:"wave hello"}` → `HTTP 200`, `"source":"cloud"`, rightArm `x=-70, z=40` (real model output; not the keyword `z=150` fallback).
   - `POST /api/ai-vision` with a 1×1 base64 PNG → `HTTP 200`, `"source":"cloud"`, cold-call ~91 s using `gemma4:31b-cloud`.
 
+---
+
+### [REPORT] report04.md — 4 image-batch bugs
+- Re-read, verified all four. All real.
+
+### [BUGFIX report04 #1] Image batch import is now atomic
+- Symptom: `ImageUploader` wrote keyframes and extended `totalFrames` frame-by-frame as each `/api/ai-vision` call returned. A mid-batch failure (quota exhaustion, one bad frame, cloud hiccup) aborted the loop but left the timeline half-imported — some keyframes already in the store, `totalFrames` already stretched.
+- Fix: extracted a pure `runImportBatch(plan, analyze, onProgress)` helper in `lib/imageImport.ts`. It stages every accepted keyframe into a local array during the loop and **only returns them if every frame succeeded**. On any failure it throws the upstream error and emits zero keyframes. `ImageUploader` calls `setTotalFrames` and `addKeyframe` from the returned batch, so the store sees either all-or-nothing.
+
+### [BUGFIX report04 #2] Cloud failure no longer re-tried on every subsequent frame
+- Symptom: in `auto` mode with a healthy local daemon and a broken cloud config (e.g. wrong key, rate-limited), every frame waited through a full cloud timeout before falling back to local. Big batches paid the cost N times.
+- Fix: `lib/ollama.ts` `generatePoseFromText` / `generatePoseFromImage` now accept an optional `backendOverride` that forces a specific backend for that single call, bypassing env-based resolution. The `/api/ai-vision` route parses `body.backend` (`'cloud' | 'local' | 'auto'`). `runImportBatch` tracks a `backendHint` via `pickBackendHint(current, seen)` — once *any* frame in the batch comes back with `source === 'local'`, every later frame sends `backend: 'local'` and skips the cloud attempt entirely.
+- Important: we still try cloud on the very first frame so a transient cloud blip doesn't permanently lock the batch to local. Only after evidence of cloud failure do we pin.
+
+### [BUGFIX report04 #3] Mixed-source batches now show "mixed"
+- Symptom: the uploader stored only the last frame's `source`, so a batch that alternated between cloud and local showed "via Ollama Cloud" or "via local Ollama" depending on whichever finished last — misleading.
+- Fix: `summariseSources(Set<AISource>)` returns `'cloud' | 'local' | 'fallback' | 'mixed' | null`. `runImportBatch` collects sources into a `Set<AISource>` and `ImageUploader` renders "mixed (cloud + local)" with both the Cloud and Server icons side by side when the set has >1 entry.
+
+### [BUGFIX report04 #4] Optional vision prompt exposed in the UI
+- Symptom: the route and backend already accepted a `prompt` field for vision, but `ImageUploader` hard-coded `{ imageBase64 }` and had no input. Users couldn't nudge the vision model about left/right, combat context, mirrored framing, etc.
+- Fix: added a 2-row textarea in `ImageUploader` ("Optional guidance (e.g. 'right-handed boxing stance, camera is mirrored')"). Value is trimmed and sent as `prompt` in every frame's request body, alongside the existing `imageBase64` / `backend` fields.
+
+### [TESTS] New cases in `__tests__/imageImport.test.ts`
+- `summariseSources`: empty → null; one → that source; two → 'mixed'.
+- `pickBackendHint`: sticks with a set hint; pins to 'local' on first local seen; stays undefined while cloud is succeeding; stays undefined on 'fallback' (caller aborts).
+- `runImportBatch`: returns all keyframes when every call succeeds; throws on a fallback result and never emits a keyframe (atomic); passes the hint forward so later calls see `'local'`; records `mixed` when sources diverge; reports 25/50/75/100% progress.
+
+### [TEST RESULT] After report04 fixes — 158/158 passed
+- `npx jest` → 9 suites, 158 tests.
+- `npx tsc --noEmit` → 0 errors.
+- `npx next build` → OK.
+
 ### [BUGFIX] In-between frames didn't interpolate position when one side was unset
 - Symptom (reported by user): tweening a moved-and-rotated joint, the rotation LERPed but position snapped to whichever keyframe had the offset set — "cal only rotate".
 - Root cause: `interpolatePose` in `components/3d/InterpolationEngine.ts` only LERPed `position` when **both** keyframes had one, and otherwise fell back to `from.position || to.position` — a pure snap, not a blend. That is fine when both keyframes set a value, but falls over once the user uses the Move gizmo only on one keyframe (which is the normal case: the initial keyframe has no `position` set, the user adds one at frame 30).

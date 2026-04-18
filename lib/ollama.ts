@@ -17,8 +17,8 @@ const CLOUD_VISION_DEFAULT = 'gemma4:31b-cloud';
 const LOCAL_TEXT_DEFAULT = 'llama3.2';
 const LOCAL_VISION_DEFAULT = 'gemma3';
 
-type Backend = 'cloud' | 'local';
-type BackendMode = Backend | 'auto';
+export type Backend = 'cloud' | 'local';
+export type BackendMode = Backend | 'auto';
 
 export function resolveBackendMode(
   envValue: string | undefined = process.env.OLLAMA_BACKEND,
@@ -159,11 +159,16 @@ async function callOnce(
  * Walk through the attempt plan for the current backend selection. Each
  * attempt gets its own body (so the caller can pick the right model per
  * backend). Throws a combined error if all attempts fail.
+ *
+ * Pass `modeOverride` to force a specific backend for this single call
+ * (used by batch image import to skip repeating cloud after the first
+ * cloud failure in the batch).
  */
 async function callOllama(
-  makeBody: (backend: Backend) => OllamaGenerateBody
+  makeBody: (backend: Backend) => OllamaGenerateBody,
+  modeOverride?: BackendMode
 ): Promise<{ response: string; source: Backend }> {
-  const mode = resolveBackendMode();
+  const mode = modeOverride ?? resolveBackendMode();
   const attempts = planAttempts(mode);
   if (attempts.length === 0) {
     throw new Error(
@@ -185,16 +190,20 @@ async function callOllama(
 // ---------- Public generators ---------------------------------------------
 
 export async function generatePoseFromText(
-  prompt: string
+  prompt: string,
+  backendOverride?: BackendMode
 ): Promise<AIPoseResult> {
   const fullPrompt = `${SYSTEM_PROMPT}\n\nDescription: ${prompt}\n\nJSON:`;
   try {
-    const { response, source } = await callOllama((backend) => ({
-      model: resolveTextModel(backend),
-      prompt: fullPrompt,
-      stream: false,
-      format: 'json',
-    }));
+    const { response, source } = await callOllama(
+      (backend) => ({
+        model: resolveTextModel(backend),
+        prompt: fullPrompt,
+        stream: false,
+        format: 'json',
+      }),
+      backendOverride
+    );
     const parsed = extractJson(response);
     return {
       pose: normalizePose(parsed),
@@ -215,17 +224,21 @@ export async function generatePoseFromText(
 
 export async function generatePoseFromImage(
   imageBase64: string,
-  prompt?: string
+  prompt?: string,
+  backendOverride?: BackendMode
 ): Promise<AIPoseResult> {
   const visionPrompt = `${SYSTEM_PROMPT}\n\nAnalyze the pose in this image and return the R6 joint rotations as JSON. ${prompt || ''}`;
   try {
-    const { response, source } = await callOllama((backend) => ({
-      model: resolveVisionModel(backend),
-      prompt: visionPrompt,
-      images: [imageBase64],
-      stream: false,
-      format: 'json',
-    }));
+    const { response, source } = await callOllama(
+      (backend) => ({
+        model: resolveVisionModel(backend),
+        prompt: visionPrompt,
+        images: [imageBase64],
+        stream: false,
+        format: 'json',
+      }),
+      backendOverride
+    );
     const parsed = extractJson(response);
     return {
       pose: normalizePose(parsed),
