@@ -168,3 +168,31 @@ This file tracks features, bugs, fixes, and updates to the Roblox R6 AI Animator
 - `npx tsc --noEmit` → 0 errors.
 - `npx next build` → OK, /page 9.59 kB.
 - Browser verified: idle character stands with feet on grid line; Jump preset shows character lifted, shadow cast on ground below; T-Pose still spreads arms laterally from shoulders.
+
+---
+
+### [FEATURE] In-canvas editor — click-to-select + drag gizmo
+- Click a body part directly in the 3D viewport to select it; a drei `TransformControls` gizmo appears on the selected joint.
+- **Rotate gizmo** on any part — drag the red/green/blue rings to spin the joint around X/Y/Z. Rotations pivot at the shoulder/hip/neck because the gizmo is attached to the joint's `<group>` via a forwarded ref.
+- **Move gizmo** on the torso only — drags the rig root (`rigRootRef`) so `torso.position` moves; other parts auto-disable the Move button because translating a joint origin would desync the rig.
+- `TransformControls.onObjectChange` reads the mutated object's rotation/position on every drag tick, converts radians→degrees where relevant, and writes back through `updatePartRotation` / `updatePartPosition`. Those go through the fixed "interpolated pose as base" path from report #1, so dragging at an in-between frame creates a clean keyframe without resetting untouched joints.
+- `OrbitControls makeDefault` lets drei auto-disable the orbit camera while the user is dragging a gizmo — no bespoke pointer-event juggling.
+- UI: Gizmo section under Body Parts with Rotate/Move toggle (Move is `disabled` unless torso is selected). Keyboard shortcuts: **R** → rotate, **T**/**G** → translate, **Esc** → deselect. Shortcuts ignore focused inputs/textareas so typing in the prompt box doesn't accidentally switch modes.
+
+### [REFACTOR] Forwarded refs for all joints
+- `Joint` wrapped in `forwardRef<THREE.Group, JointProps>` so `R6Model` can keep one `RefObject<THREE.Group>` per body part and hand the right one to `TransformControls` when a part is selected.
+- Added `rigRootRef` for the outer rig-root `<group>` that holds `torso.position`; that ref is what the Move gizmo attaches to.
+
+### [STORE] New actions `updatePartPosition` + `gizmoMode`
+- `updatePartPosition(frame, part, position)` — symmetrical twin of `updatePartRotation`, also uses `interpolatePose` as the base when no exact keyframe exists.
+- `gizmoMode: 'rotate' | 'translate'` with `setGizmoMode(mode)` — single source of truth for the gizmo UI and the TransformControls `mode` prop.
+
+### [TESTS] 4 new cases
+- `useAnimationStore.test.ts`: gizmoMode defaults to 'rotate'; `setGizmoMode` toggles it; `updatePartPosition` on an in-between frame uses the interpolated base; `updatePartPosition` updates an existing keyframe in place.
+
+### [TEST RESULT] Final — 110/110 passed
+- `npx jest` → 7 suites, 110 tests in ~1s.
+- `npx tsc --noEmit` → 0 errors.
+- `npx next build` → OK, /page 10.2 kB (up from 9.59 kB with the gizmo wiring).
+- Dev-server note: had to `rm -rf .next` and restart once because a stale `_not-found` compile was serving `/` as 404 after many HMR cycles — HMR state issue, not a code bug.
+- Browser verified: clicking Torso + Move shows an X/Y/Z arrow gizmo, dragging the red X-arrow translates the whole rig to the right, sliders reflect the new position; clicking Right Arm + Rotate shows a 3-ring gizmo pivoted at the shoulder.

@@ -42,6 +42,8 @@ export interface Keyframe {
 
 export type EasingType = 'linear' | 'easeIn' | 'easeOut' | 'easeInOut';
 
+export type GizmoMode = 'rotate' | 'translate';
+
 export interface AnimationClip {
   name: string;
   duration: number;

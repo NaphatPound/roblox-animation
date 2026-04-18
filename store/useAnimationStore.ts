@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type {
+  GizmoMode,
   Keyframe,
   R6Pose,
   R6PartName,
@@ -36,6 +37,10 @@ interface AnimationState extends PlaybackState {
 
   selectPart: (part: R6PartName | null) => void;
   updatePartRotation: (frame: number, part: R6PartName, rotation: Vec3) => void;
+  updatePartPosition: (frame: number, part: R6PartName, position: Vec3) => void;
+
+  gizmoMode: GizmoMode;
+  setGizmoMode: (mode: GizmoMode) => void;
 }
 
 function findOrCreateKeyframe(
@@ -66,6 +71,7 @@ export const useAnimationStore = create<AnimationState>((set, get) => ({
   loop: true,
   speed: 1,
   selectedPart: null,
+  gizmoMode: 'rotate',
 
   addKeyframe: (frame, pose) => {
     set((state) => {
@@ -165,4 +171,37 @@ export const useAnimationStore = create<AnimationState>((set, get) => ({
       };
     });
   },
+
+  updatePartPosition: (frame, part, position) => {
+    set((state) => {
+      const existingAtFrame = state.keyframes.find((kf) => kf.frame === frame);
+      const basePose = existingAtFrame
+        ? existingAtFrame.pose
+        : interpolatePose(state.keyframes, frame);
+      const { keyframes, target } = findOrCreateKeyframe(
+        state.keyframes,
+        frame,
+        basePose
+      );
+      const updated = keyframes.map((kf) =>
+        kf.id === target.id
+          ? {
+              ...kf,
+              pose: {
+                ...clonePose(kf.pose),
+                [part]: {
+                  ...kf.pose[part],
+                  position: { ...position },
+                },
+              },
+            }
+          : kf
+      );
+      return {
+        keyframes: updated.sort((a, b) => a.frame - b.frame),
+      };
+    });
+  },
+
+  setGizmoMode: (mode) => set({ gizmoMode: mode }),
 }));

@@ -14,6 +14,7 @@ function resetStore() {
     loop: true,
     speed: 1,
     selectedPart: null,
+    gizmoMode: 'rotate',
   });
 }
 
@@ -171,6 +172,51 @@ describe('useAnimationStore', () => {
     expect(s.keyframes).toHaveLength(1);
     expect(s.currentFrame).toBe(0);
     expect(s.isPlaying).toBe(false);
+  });
+
+  it('gizmoMode defaults to rotate', () => {
+    expect(useAnimationStore.getState().gizmoMode).toBe('rotate');
+  });
+
+  it('setGizmoMode switches between rotate and translate', () => {
+    useAnimationStore.getState().setGizmoMode('translate');
+    expect(useAnimationStore.getState().gizmoMode).toBe('translate');
+    useAnimationStore.getState().setGizmoMode('rotate');
+    expect(useAnimationStore.getState().gizmoMode).toBe('rotate');
+  });
+
+  it('updatePartPosition creates a keyframe using the INTERPOLATED base', () => {
+    const poseA = clonePose(DEFAULT_POSE);
+    poseA.torso.position = { x: 0, y: 0, z: 0 };
+    const poseB = clonePose(DEFAULT_POSE);
+    poseB.torso.position = { x: 0, y: 2, z: 0 };
+
+    useAnimationStore.getState().clearKeyframes();
+    useAnimationStore.getState().addKeyframe(0, poseA);
+    useAnimationStore.getState().addKeyframe(30, poseB);
+
+    useAnimationStore
+      .getState()
+      .updatePartPosition(15, 'torso', { x: 1, y: 5, z: 0 });
+
+    const kf = useAnimationStore
+      .getState()
+      .keyframes.find((k) => k.frame === 15);
+    expect(kf).toBeDefined();
+    expect(kf!.pose.torso.position).toEqual({ x: 1, y: 5, z: 0 });
+    // unchanged rotations stay at whatever the interpolated base was (both are 0 here).
+    expect(kf!.pose.head.rotation).toEqual({ x: 0, y: 0, z: 0 });
+  });
+
+  it('updatePartPosition on an existing keyframe updates in place', () => {
+    useAnimationStore.getState().addKeyframe(10, DEFAULT_POSE);
+    useAnimationStore
+      .getState()
+      .updatePartPosition(10, 'torso', { x: 0, y: -1.5, z: 0 });
+    const kf = useAnimationStore
+      .getState()
+      .keyframes.find((k) => k.frame === 10);
+    expect(kf!.pose.torso.position).toEqual({ x: 0, y: -1.5, z: 0 });
   });
 });
 

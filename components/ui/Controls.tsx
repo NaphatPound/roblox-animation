@@ -1,10 +1,11 @@
 'use client';
 
+import { useEffect } from 'react';
 import { useAnimationStore } from '@/store/useAnimationStore';
 import { interpolatePose } from '@/components/3d/InterpolationEngine';
 import { POSE_PRESETS, PRESET_ORDER } from '@/lib/presets';
 import type { R6PartName } from '@/types';
-import { RotateCcw, Shapes } from 'lucide-react';
+import { Move3D, Rotate3D, RotateCcw, Shapes } from 'lucide-react';
 
 const PART_LABELS: Record<R6PartName, string> = {
   head: 'Head',
@@ -32,7 +33,30 @@ export function Controls() {
     currentFrame,
     updatePartRotation,
     addKeyframe,
+    gizmoMode,
+    setGizmoMode,
   } = useAnimationStore();
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      if (e.key === 'r' || e.key === 'R') setGizmoMode('rotate');
+      if (e.key === 't' || e.key === 'T' || e.key === 'g' || e.key === 'G') {
+        setGizmoMode('translate');
+      }
+      if (e.key === 'Escape') selectPart(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [setGizmoMode, selectPart]);
 
   const currentPose = interpolatePose(keyframes, currentFrame);
   const part = selectedPart ? currentPose[selectedPart] : null;
@@ -91,6 +115,33 @@ export function Controls() {
             {PART_LABELS[name]}
           </button>
         ))}
+      </div>
+
+      <div className="flex items-center gap-2 mt-1">
+        <span className="text-xs text-gray-400">Gizmo</span>
+        <button
+          onClick={() => setGizmoMode('rotate')}
+          title="Rotate (R)"
+          className={`flex items-center gap-1 px-2 py-1 text-xs rounded transition ${
+            gizmoMode === 'rotate'
+              ? 'bg-blue-500 text-white'
+              : 'bg-[#0a0a0a] text-gray-300 hover:bg-[#222]'
+          }`}
+        >
+          <Rotate3D size={12} /> Rotate
+        </button>
+        <button
+          onClick={() => setGizmoMode('translate')}
+          title="Move (T) — torso only"
+          disabled={selectedPart !== null && selectedPart !== 'torso'}
+          className={`flex items-center gap-1 px-2 py-1 text-xs rounded transition disabled:opacity-40 disabled:cursor-not-allowed ${
+            gizmoMode === 'translate'
+              ? 'bg-blue-500 text-white'
+              : 'bg-[#0a0a0a] text-gray-300 hover:bg-[#222]'
+          }`}
+        >
+          <Move3D size={12} /> Move
+        </button>
       </div>
 
       {selectedPart && part && (

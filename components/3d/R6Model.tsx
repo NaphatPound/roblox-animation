@@ -1,7 +1,8 @@
 'use client';
 
-import { useRef, useMemo } from 'react';
+import { forwardRef, useRef, useMemo } from 'react';
 import { useFrame } from '@react-three/fiber';
+import { TransformControls } from '@react-three/drei';
 import * as THREE from 'three';
 import type { R6Pose, R6PartName, Vec3 } from '@/types';
 import { useAnimationStore } from '@/store/useAnimationStore';
@@ -9,7 +10,7 @@ import {
   interpolatePose,
   advanceFrame,
 } from '@/components/3d/InterpolationEngine';
-import { degToRad } from '@/utils/mathUtils';
+import { degToRad, radToDeg } from '@/utils/mathUtils';
 
 // R6 proportions (Roblox stud units).
 const PART_SIZES: Record<R6PartName, [number, number, number]> = {
@@ -59,13 +60,24 @@ interface JointProps {
   children?: React.ReactNode;
 }
 
-function Joint({ name, rotation, isSelected, onSelect, children }: JointProps) {
+const Joint = forwardRef<THREE.Group, JointProps>(function Joint(
+  { name, rotation, isSelected, onSelect, children },
+  ref
+) {
   const [px, py, pz] = JOINT_POSITIONS[name];
   const [ox, oy, oz] = MESH_OFFSETS[name];
   const [sx, sy, sz] = PART_SIZES[name];
 
   return (
-    <group position={[px, py, pz]} rotation={[degToRad(rotation.x), degToRad(rotation.y), degToRad(rotation.z)]}>
+    <group
+      ref={ref}
+      position={[px, py, pz]}
+      rotation={[
+        degToRad(rotation.x),
+        degToRad(rotation.y),
+        degToRad(rotation.z),
+      ]}
+    >
       <mesh
         position={[ox, oy, oz]}
         onClick={(e) => {
@@ -86,10 +98,9 @@ function Joint({ name, rotation, isSelected, onSelect, children }: JointProps) {
       {children}
     </group>
   );
-}
+});
 
 function Face() {
-  // Face details attached to head mesh (local to head group).
   const [ox, oy, oz] = MESH_OFFSETS.head;
   const eyeY = oy + 0.1;
   const eyeZ = oz + 0.61;
@@ -118,7 +129,16 @@ export interface R6ModelProps {
 }
 
 export function R6Model({ pose: externalPose, interactive = true }: R6ModelProps) {
-  const groupRef = useRef<THREE.Group>(null);
+  const rigRootRef = useRef<THREE.Group>(null);
+  const jointRefs = {
+    head: useRef<THREE.Group>(null),
+    torso: useRef<THREE.Group>(null),
+    leftArm: useRef<THREE.Group>(null),
+    rightArm: useRef<THREE.Group>(null),
+    leftLeg: useRef<THREE.Group>(null),
+    rightLeg: useRef<THREE.Group>(null),
+  } as Record<R6PartName, React.RefObject<THREE.Group>>;
+
   const {
     keyframes,
     currentFrame,
@@ -128,9 +148,12 @@ export function R6Model({ pose: externalPose, interactive = true }: R6ModelProps
     totalFrames,
     fps,
     selectedPart,
+    gizmoMode,
     setCurrentFrame,
     selectPart,
     pause,
+    updatePartRotation,
+    updatePartPosition,
   } = useAnimationStore();
 
   const interpolated = useMemo(
@@ -161,50 +184,100 @@ export function R6Model({ pose: externalPose, interactive = true }: R6ModelProps
     selectPart(name);
   };
 
-  // Torso position override (only torso follows the optional position field for moves like jump).
   const torsoPos = pose.torso.position || { x: 0, y: 0, z: 0 };
 
+  // Gizmo target: when translating the torso, drive the outer rig root
+  // (which holds torso.position). For every other case use the joint group
+  // so rotation pivots at the shoulder/hip/neck.
+  const gizmoTarget =
+    interactive && !isPlaying && selectedPart
+      ? gizmoMode === 'translate' && selectedPart === 'torso'
+        ? rigRootRef.current
+        : gizmoMode === 'rotate'
+          ? jointRefs[selectedPart].current
+          : null
+      : null;
+
+  const handleGizmoChange = () => {
+    if (!selectedPart) return;
+    const frame = Math.round(currentFrame);
+    if (gizmoMode === 'rotate') {
+      const obj = jointRefs[selectedPart].current;
+      if (!obj) return;
+      updatePartRotation(frame, selectedPart, {
+        x: radToDeg(obj.rotation.x),
+        y: radToDeg(obj.rotation.y),
+        z: radToDeg(obj.rotation.z),
+      });
+    } else if (gizmoMode === 'translate' && selectedPart === 'torso') {
+      const obj = rigRootRef.current;
+      if (!obj) return;
+      updatePartPosition(frame, 'torso', {
+        x: obj.position.x,
+        y: obj.position.y,
+        z: obj.position.z,
+      });
+    }
+  };
+
   return (
-    <group ref={groupRef} position={[torsoPos.x, torsoPos.y, torsoPos.z]}>
-      <Joint
-        name="torso"
-        rotation={pose.torso.rotation}
-        isSelected={interactive && selectedPart === 'torso'}
-        onSelect={() => select('torso')}
-      >
+    <>
+      <group ref={rigRootRef} position={[torsoPos.x, torsoPos.y, torsoPos.z]}>
         <Joint
-          name="head"
-          rotation={pose.head.rotation}
-          isSelected={interactive && selectedPart === 'head'}
-          onSelect={() => select('head')}
+          ref={jointRefs.torso}
+          name="torso"
+          rotation={pose.torso.rotation}
+          isSelected={interactive && selectedPart === 'torso'}
+          onSelect={() => select('torso')}
         >
-          <Face />
+          <Joint
+            ref={jointRefs.head}
+            name="head"
+            rotation={pose.head.rotation}
+            isSelected={interactive && selectedPart === 'head'}
+            onSelect={() => select('head')}
+          >
+            <Face />
+          </Joint>
+          <Joint
+            ref={jointRefs.leftArm}
+            name="leftArm"
+            rotation={pose.leftArm.rotation}
+            isSelected={interactive && selectedPart === 'leftArm'}
+            onSelect={() => select('leftArm')}
+          />
+          <Joint
+            ref={jointRefs.rightArm}
+            name="rightArm"
+            rotation={pose.rightArm.rotation}
+            isSelected={interactive && selectedPart === 'rightArm'}
+            onSelect={() => select('rightArm')}
+          />
+          <Joint
+            ref={jointRefs.leftLeg}
+            name="leftLeg"
+            rotation={pose.leftLeg.rotation}
+            isSelected={interactive && selectedPart === 'leftLeg'}
+            onSelect={() => select('leftLeg')}
+          />
+          <Joint
+            ref={jointRefs.rightLeg}
+            name="rightLeg"
+            rotation={pose.rightLeg.rotation}
+            isSelected={interactive && selectedPart === 'rightLeg'}
+            onSelect={() => select('rightLeg')}
+          />
         </Joint>
-        <Joint
-          name="leftArm"
-          rotation={pose.leftArm.rotation}
-          isSelected={interactive && selectedPart === 'leftArm'}
-          onSelect={() => select('leftArm')}
+      </group>
+
+      {gizmoTarget && (
+        <TransformControls
+          object={gizmoTarget}
+          mode={gizmoMode}
+          size={0.8}
+          onObjectChange={handleGizmoChange}
         />
-        <Joint
-          name="rightArm"
-          rotation={pose.rightArm.rotation}
-          isSelected={interactive && selectedPart === 'rightArm'}
-          onSelect={() => select('rightArm')}
-        />
-        <Joint
-          name="leftLeg"
-          rotation={pose.leftLeg.rotation}
-          isSelected={interactive && selectedPart === 'leftLeg'}
-          onSelect={() => select('leftLeg')}
-        />
-        <Joint
-          name="rightLeg"
-          rotation={pose.rightLeg.rotation}
-          isSelected={interactive && selectedPart === 'rightLeg'}
-          onSelect={() => select('rightLeg')}
-        />
-      </Joint>
-    </group>
+      )}
+    </>
   );
 }

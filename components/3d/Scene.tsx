@@ -1,7 +1,7 @@
 'use client';
 
 import { Canvas } from '@react-three/fiber';
-import { OrbitControls, Grid, Environment } from '@react-three/drei';
+import { OrbitControls, Grid } from '@react-three/drei';
 import { R6Model } from '@/components/3d/R6Model';
 import { Suspense } from 'react';
 
@@ -57,6 +57,7 @@ export function Scene() {
           </mesh>
 
           <OrbitControls
+            makeDefault
             enableDamping
             dampingFactor={0.08}
             minDistance={4}
