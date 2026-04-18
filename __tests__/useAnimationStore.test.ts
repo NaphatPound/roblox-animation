@@ -218,6 +218,20 @@ describe('useAnimationStore', () => {
       .keyframes.find((k) => k.frame === 10);
     expect(kf!.pose.torso.position).toEqual({ x: 0, y: -1.5, z: 0 });
   });
+
+  it('updatePartPosition works on non-torso parts (stored as joint offset)', () => {
+    useAnimationStore.getState().clearKeyframes();
+    useAnimationStore
+      .getState()
+      .updatePartPosition(5, 'rightArm', { x: 0.5, y: 0, z: 0 });
+    const kf = useAnimationStore
+      .getState()
+      .keyframes.find((k) => k.frame === 5);
+    expect(kf).toBeDefined();
+    expect(kf!.pose.rightArm.position).toEqual({ x: 0.5, y: 0, z: 0 });
+    // other parts should stay at their default (no position set).
+    expect(kf!.pose.leftArm.position).toBeUndefined();
+  });
 });
 
 describe('clonePose', () => {

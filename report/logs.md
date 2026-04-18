@@ -196,3 +196,24 @@ This file tracks features, bugs, fixes, and updates to the Roblox R6 AI Animator
 - `npx next build` → OK, /page 10.2 kB (up from 9.59 kB with the gizmo wiring).
 - Dev-server note: had to `rm -rf .next` and restart once because a stale `_not-found` compile was serving `/` as 404 after many HMR cycles — HMR state issue, not a code bug.
 - Browser verified: clicking Torso + Move shows an X/Y/Z arrow gizmo, dragging the red X-arrow translates the whole rig to the right, sliders reflect the new position; clicking Right Arm + Rotate shows a 3-ring gizmo pivoted at the shoulder.
+
+---
+
+### [FEATURE] Move gizmo now works on every body part
+- Previously: Move was limited to the torso (rig root translation). All other parts auto-disabled the Move button.
+- Now: every joint can be translated via the gizmo. Torso keeps its special semantic (rig-root translation through `rigRootRef`). For head/arms/legs, `pose[part].position` is treated as a **local offset** added on top of the hard-coded `JOINT_POSITIONS[part]`.
+- Implementation:
+  - `Joint` accepts an optional `positionOffset?: Vec3` prop and renders at `[jointOrigin.x + offset.x, ...]`.
+  - R6Model passes `pose[name].position` into every non-torso `Joint` as the offset.
+  - Gizmo change handler now has two translate paths: `torso` → writes the absolute rig-root position; other parts → writes `(obj.position − JOINT_POSITIONS[part])` so the stored value is a clean delta from the joint origin.
+  - Move button in `Controls` is no longer disabled; the tooltip now explains the two semantics.
+- `interpolatePose` already LERPs positions when present, so two keyframes with different limb offsets blend smoothly between them — no engine change needed.
+
+### [TESTS] Regression for non-torso position
+- `useAnimationStore.test.ts`: `updatePartPosition(5, 'rightArm', {x:0.5,y:0,z:0})` writes the offset onto the rightArm keyframe; untouched parts (leftArm) keep `position` as `undefined` so they stay on their default joint origin.
+
+### [TEST RESULT] 111/111 passed
+- `npx jest` → 7 suites, 111 tests.
+- `npx tsc --noEmit` → 0 errors.
+- `npx next build` → OK.
+- Browser verified: selected Right Arm + Move → dragged the Y arrow up → right arm floated above the shoulder (and the rotation sliders correctly stayed at 0, since Move edits position only).

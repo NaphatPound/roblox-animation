@@ -55,23 +55,27 @@ const PART_COLORS: Record<R6PartName, string> = {
 interface JointProps {
   name: R6PartName;
   rotation: Vec3;
+  positionOffset?: Vec3;
   isSelected: boolean;
   onSelect: () => void;
   children?: React.ReactNode;
 }
 
 const Joint = forwardRef<THREE.Group, JointProps>(function Joint(
-  { name, rotation, isSelected, onSelect, children },
+  { name, rotation, positionOffset, isSelected, onSelect, children },
   ref
 ) {
   const [px, py, pz] = JOINT_POSITIONS[name];
   const [ox, oy, oz] = MESH_OFFSETS[name];
   const [sx, sy, sz] = PART_SIZES[name];
+  const offX = positionOffset?.x ?? 0;
+  const offY = positionOffset?.y ?? 0;
+  const offZ = positionOffset?.z ?? 0;
 
   return (
     <group
       ref={ref}
-      position={[px, py, pz]}
+      position={[px + offX, py + offY, pz + offZ]}
       rotation={[
         degToRad(rotation.x),
         degToRad(rotation.y),
@@ -186,16 +190,14 @@ export function R6Model({ pose: externalPose, interactive = true }: R6ModelProps
 
   const torsoPos = pose.torso.position || { x: 0, y: 0, z: 0 };
 
-  // Gizmo target: when translating the torso, drive the outer rig root
-  // (which holds torso.position). For every other case use the joint group
-  // so rotation pivots at the shoulder/hip/neck.
+  // Gizmo target: torso-translate drives the outer rig root (rig-world
+  // translation). Rotate and non-torso translate both attach to the
+  // individual joint group so the shoulder/hip/neck stays the pivot.
   const gizmoTarget =
     interactive && !isPlaying && selectedPart
       ? gizmoMode === 'translate' && selectedPart === 'torso'
         ? rigRootRef.current
-        : gizmoMode === 'rotate'
-          ? jointRefs[selectedPart].current
-          : null
+        : jointRefs[selectedPart].current
       : null;
 
   const handleGizmoChange = () => {
@@ -209,14 +211,27 @@ export function R6Model({ pose: externalPose, interactive = true }: R6ModelProps
         y: radToDeg(obj.rotation.y),
         z: radToDeg(obj.rotation.z),
       });
-    } else if (gizmoMode === 'translate' && selectedPart === 'torso') {
-      const obj = rigRootRef.current;
-      if (!obj) return;
-      updatePartPosition(frame, 'torso', {
-        x: obj.position.x,
-        y: obj.position.y,
-        z: obj.position.z,
-      });
+    } else if (gizmoMode === 'translate') {
+      if (selectedPart === 'torso') {
+        const obj = rigRootRef.current;
+        if (!obj) return;
+        updatePartPosition(frame, 'torso', {
+          x: obj.position.x,
+          y: obj.position.y,
+          z: obj.position.z,
+        });
+      } else {
+        // Non-torso parts: store the delta from the joint's default origin
+        // so R6Model can add it back onto JOINT_POSITIONS when rendering.
+        const obj = jointRefs[selectedPart].current;
+        if (!obj) return;
+        const [jx, jy, jz] = JOINT_POSITIONS[selectedPart];
+        updatePartPosition(frame, selectedPart, {
+          x: obj.position.x - jx,
+          y: obj.position.y - jy,
+          z: obj.position.z - jz,
+        });
+      }
     }
   };
 
@@ -234,6 +249,7 @@ export function R6Model({ pose: externalPose, interactive = true }: R6ModelProps
             ref={jointRefs.head}
             name="head"
             rotation={pose.head.rotation}
+            positionOffset={pose.head.position}
             isSelected={interactive && selectedPart === 'head'}
             onSelect={() => select('head')}
           >
@@ -243,6 +259,7 @@ export function R6Model({ pose: externalPose, interactive = true }: R6ModelProps
             ref={jointRefs.leftArm}
             name="leftArm"
             rotation={pose.leftArm.rotation}
+            positionOffset={pose.leftArm.position}
             isSelected={interactive && selectedPart === 'leftArm'}
             onSelect={() => select('leftArm')}
           />
@@ -250,6 +267,7 @@ export function R6Model({ pose: externalPose, interactive = true }: R6ModelProps
             ref={jointRefs.rightArm}
             name="rightArm"
             rotation={pose.rightArm.rotation}
+            positionOffset={pose.rightArm.position}
             isSelected={interactive && selectedPart === 'rightArm'}
             onSelect={() => select('rightArm')}
           />
@@ -257,6 +275,7 @@ export function R6Model({ pose: externalPose, interactive = true }: R6ModelProps
             ref={jointRefs.leftLeg}
             name="leftLeg"
             rotation={pose.leftLeg.rotation}
+            positionOffset={pose.leftLeg.position}
             isSelected={interactive && selectedPart === 'leftLeg'}
             onSelect={() => select('leftLeg')}
           />
@@ -264,6 +283,7 @@ export function R6Model({ pose: externalPose, interactive = true }: R6ModelProps
             ref={jointRefs.rightLeg}
             name="rightLeg"
             rotation={pose.rightLeg.rotation}
+            positionOffset={pose.rightLeg.position}
             isSelected={interactive && selectedPart === 'rightLeg'}
             onSelect={() => select('rightLeg')}
           />

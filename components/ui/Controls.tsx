@@ -132,9 +132,8 @@ export function Controls() {
         </button>
         <button
           onClick={() => setGizmoMode('translate')}
-          title="Move (T) — torso only"
-          disabled={selectedPart !== null && selectedPart !== 'torso'}
-          className={`flex items-center gap-1 px-2 py-1 text-xs rounded transition disabled:opacity-40 disabled:cursor-not-allowed ${
+          title="Move (T) — torso moves the rig root; other parts offset from the joint"
+          className={`flex items-center gap-1 px-2 py-1 text-xs rounded transition ${
             gizmoMode === 'translate'
               ? 'bg-blue-500 text-white'
               : 'bg-[#0a0a0a] text-gray-300 hover:bg-[#222]'
