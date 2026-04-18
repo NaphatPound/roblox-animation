@@ -1,6 +1,6 @@
 import type { Keyframe, R6Pose, R6PartName, Vec3 } from '@/types';
 import { slerpEuler, lerpVec3, applyEasing } from '@/utils/mathUtils';
-import { DEFAULT_POSE, clonePose } from '@/store/useAnimationStore';
+import { DEFAULT_POSE, clonePose } from '@/lib/pose';
 
 const PART_NAMES: R6PartName[] = [
   'head',

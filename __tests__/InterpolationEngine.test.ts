@@ -130,4 +130,15 @@ describe('advanceFrame', () => {
     expect(fps60.frame).toBe(30);
     expect(fps24.frame).toBe(12);
   });
+
+  it('signals reachedEnd=true with loop=false so the caller can stop playback (regression: report #2)', () => {
+    const { frame, reachedEnd } = advanceFrame(58, 60, 1, false, 5);
+    expect(reachedEnd).toBe(true);
+    expect(frame).toBe(60);
+  });
+
+  it('signals reachedEnd=true with loop=true so the caller can emit an end-event while continuing', () => {
+    const { reachedEnd } = advanceFrame(58, 60, 1, true, 5);
+    expect(reachedEnd).toBe(true);
+  });
 });

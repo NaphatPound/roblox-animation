@@ -135,6 +135,33 @@ describe('useAnimationStore', () => {
     expect(kf!.pose.head.rotation).toEqual({ x: 10, y: 20, z: 30 });
   });
 
+  it('updatePartRotation at an in-between frame bases the new keyframe on the INTERPOLATED pose (regression: report #1)', () => {
+    const poseA = clonePose(DEFAULT_POSE);
+    poseA.rightArm.rotation = { x: 0, y: 0, z: 0 };
+    poseA.leftArm.rotation = { x: 0, y: 0, z: 0 };
+    const poseB = clonePose(DEFAULT_POSE);
+    poseB.rightArm.rotation = { x: 0, y: 0, z: 0 };
+    poseB.leftArm.rotation = { x: 60, y: 0, z: 0 }; // left arm swings forward by frame 30
+
+    useAnimationStore.getState().clearKeyframes();
+    useAnimationStore.getState().addKeyframe(0, poseA);
+    useAnimationStore.getState().addKeyframe(30, poseB);
+
+    // edit only the HEAD at frame 15; leftArm must keep ~30 deg (halfway to 60).
+    useAnimationStore
+      .getState()
+      .updatePartRotation(15, 'head', { x: 45, y: 0, z: 0 });
+
+    const kf = useAnimationStore
+      .getState()
+      .keyframes.find((k) => k.frame === 15);
+    expect(kf).toBeDefined();
+    expect(kf!.pose.head.rotation).toEqual({ x: 45, y: 0, z: 0 });
+    // unedited parts must come from the interpolated pose — NOT reset to frame 0.
+    expect(kf!.pose.leftArm.rotation.x).toBeGreaterThan(20);
+    expect(kf!.pose.leftArm.rotation.x).toBeLessThan(40);
+  });
+
   it('clearKeyframes restores initial state', () => {
     const { addKeyframe, clearKeyframes } = useAnimationStore.getState();
     addKeyframe(10, DEFAULT_POSE);

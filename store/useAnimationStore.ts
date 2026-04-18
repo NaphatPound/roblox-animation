@@ -7,44 +7,10 @@ import type {
   Vec3,
 } from '@/types';
 import { generateId } from '@/utils/mathUtils';
+import { DEFAULT_POSE, clonePose } from '@/lib/pose';
+import { interpolatePose } from '@/components/3d/InterpolationEngine';
 
-export const DEFAULT_POSE: R6Pose = {
-  head: { rotation: { x: 0, y: 0, z: 0 }, position: { x: 0, y: 2.5, z: 0 } },
-  torso: { rotation: { x: 0, y: 0, z: 0 }, position: { x: 0, y: 1.2, z: 0 } },
-  leftArm: { rotation: { x: 0, y: 0, z: 0 }, position: { x: -1.2, y: 1.2, z: 0 } },
-  rightArm: { rotation: { x: 0, y: 0, z: 0 }, position: { x: 1.2, y: 1.2, z: 0 } },
-  leftLeg: { rotation: { x: 0, y: 0, z: 0 }, position: { x: -0.4, y: -0.5, z: 0 } },
-  rightLeg: { rotation: { x: 0, y: 0, z: 0 }, position: { x: 0.4, y: -0.5, z: 0 } },
-};
-
-export function clonePose(pose: R6Pose): R6Pose {
-  return {
-    head: {
-      rotation: { ...pose.head.rotation },
-      position: pose.head.position ? { ...pose.head.position } : undefined,
-    },
-    torso: {
-      rotation: { ...pose.torso.rotation },
-      position: pose.torso.position ? { ...pose.torso.position } : undefined,
-    },
-    leftArm: {
-      rotation: { ...pose.leftArm.rotation },
-      position: pose.leftArm.position ? { ...pose.leftArm.position } : undefined,
-    },
-    rightArm: {
-      rotation: { ...pose.rightArm.rotation },
-      position: pose.rightArm.position ? { ...pose.rightArm.position } : undefined,
-    },
-    leftLeg: {
-      rotation: { ...pose.leftLeg.rotation },
-      position: pose.leftLeg.position ? { ...pose.leftLeg.position } : undefined,
-    },
-    rightLeg: {
-      rotation: { ...pose.rightLeg.rotation },
-      position: pose.rightLeg.position ? { ...pose.rightLeg.position } : undefined,
-    },
-  };
-}
+export { DEFAULT_POSE, clonePose };
 
 interface AnimationState extends PlaybackState {
   keyframes: Keyframe[];
@@ -171,10 +137,10 @@ export const useAnimationStore = create<AnimationState>((set, get) => ({
 
   updatePartRotation: (frame, part, rotation) => {
     set((state) => {
-      const basePose =
-        state.keyframes.find((kf) => kf.frame === frame)?.pose ||
-        state.keyframes[0]?.pose ||
-        DEFAULT_POSE;
+      const existingAtFrame = state.keyframes.find((kf) => kf.frame === frame);
+      const basePose = existingAtFrame
+        ? existingAtFrame.pose
+        : interpolatePose(state.keyframes, frame);
       const { keyframes, target } = findOrCreateKeyframe(
         state.keyframes,
         frame,

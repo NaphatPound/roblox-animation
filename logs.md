@@ -129,3 +129,42 @@ This file tracks features, bugs, fixes, and updates to the Roblox R6 AI Animator
 - `npx tsc --noEmit` → 0 errors.
 - `npx next build` → compiled successfully, /page bundle now 9.52 kB (up from 8.02 kB with the new panels).
 - Verified in Chrome: T-Pose spreads arms laterally, Wave raises right arm up-right, Punch R throws the right arm forward from the shoulder, SLERP at `frame=15` between T-Pose and Wave shows a smooth mid-transition pose (both arms rotating proportionally — proves quaternion interpolation not Euler).
+
+---
+
+### [REPORT] Handoff bug-report from another agent — `report.md`
+- Received a 4-bug handoff listing High/Medium severity issues: in-between-frame edit, non-looping playback, easing round-trip, rig-root/ground mismatch. All 4 verified as real by reading code at the cited line numbers.
+
+### [REFACTOR] Extracted pose primitives to break a latent circular-import
+- Moved `DEFAULT_POSE` and `clonePose` from `store/useAnimationStore.ts` into `lib/pose.ts`.
+- Store and `InterpolationEngine.ts` now both import from `lib/pose`. Store re-exports `DEFAULT_POSE` / `clonePose` so existing imports elsewhere still compile.
+- Needed so the store can `import { interpolatePose } from '@/components/3d/InterpolationEngine'` without a cycle (InterpolationEngine had previously imported `DEFAULT_POSE` from the store).
+
+### [BUGFIX #1] In-between edit no longer resets unedited parts
+- `updatePartRotation` used to fall back to `state.keyframes[0]?.pose` when no keyframe existed at the current frame. Editing at frame 15 between keyframes at 0 and 30 would stamp frame 0's untouched parts into the new keyframe.
+- Now: when no exact match exists, the base pose comes from `interpolatePose(state.keyframes, frame)` — all unedited parts carry the current visual pose.
+- Regression test: `useAnimationStore.test.ts` asserts `leftArm.rotation.x` at frame 15 is between 20° and 40° when the two surrounding keyframes are 0° and 60°.
+
+### [BUGFIX #2] Non-looping playback now stops at the end
+- `R6Model`'s `useFrame` destructured `{ frame }` from `advanceFrame(...)` and threw away `reachedEnd`. With `loop=false` the render loop kept ticking against `totalFrames`, the Play/Pause button stayed wrong, and the store kept receiving `setCurrentFrame(totalFrames)` forever.
+- Now: `R6Model` also pulls the `pause` action from the store and calls it when `reachedEnd && !loop`.
+- Regression tests in `InterpolationEngine.test.ts`: `advanceFrame(58, 60, 1, false, 5)` returns `reachedEnd=true` at `frame=60`; and with `loop=true` also emits `reachedEnd=true` so a loop observer could fire an end-event.
+
+### [BUGFIX #3] Export/Import preserves `easing`
+- `sanitizeClip` and `toAnimationClip` in `lib/animationClip.ts` never read or wrote `keyframe.easing`. Round-tripping through JSON silently dropped all non-linear easing.
+- Now: easing is parsed via an allow-list (`linear | easeIn | easeOut | easeInOut`) — unknown strings are discarded rather than passed through. The field is only written when present, so keyframes without easing don't get a spurious `"easing": null`.
+- Regression tests in `animationClip.test.ts`: round-trips `[easeInOut, linear, easeOut]` intact, drops a made-up `"bounce"`, and omits the key entirely for un-eased frames.
+
+### [BUGFIX #4] Rig root and ground plane now use one convention
+- Before: `DEFAULT_POSE.torso.position = {y: 1.2}` (inherited from the earlier primitive-box rendering that used absolute world positions), but `Scene.GROUND_Y = -3` and `R6Model` used joint-relative positions. The torso offset lifted the whole rig 1.2 units above ground in idle. Jump/crouch presets further stacked their own offsets on top.
+- Also removed the stale `position` fields on non-torso parts of `DEFAULT_POSE` — they were never read by `R6Model` anymore (joint locations are hard-coded constants) and were misleading.
+- After: `DEFAULT_POSE.torso.position = {0,0,0}`. Rig origin = world origin. Rig math (torso half-height 1 + hip offset 1 + leg length 2) gives feet at y=-3, exactly `GROUND_Y`.
+- Presets normalised: `jump` → `torso.y = +2` (feet clear ground by 2); `crouch` → `torso.y = -1.5` (bent legs reach ground).
+- Regression tests in new `groundAlignment.test.ts` assert: idle feet exactly on ground, non-torso parts carry no baked-in position, jump lifts above ground, crouch leaves bent feet at/near the ground.
+
+### [TEST RESULT] After report fixes — 106/106 passed
+- 12 new regression tests added across `useAnimationStore.test.ts`, `InterpolationEngine.test.ts`, `animationClip.test.ts`, and the new `groundAlignment.test.ts`.
+- `npx jest` → 7 suites, 106 tests in ~1s.
+- `npx tsc --noEmit` → 0 errors.
+- `npx next build` → OK, /page 9.59 kB.
+- Browser verified: idle character stands with feet on grid line; Jump preset shows character lifted, shadow cast on ground below; T-Pose still spreads arms laterally from shoulders.

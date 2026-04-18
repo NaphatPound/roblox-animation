@@ -117,4 +117,49 @@ describe('toAnimationClip', () => {
     expect(clip.duration).toBe(120);
     expect(clip.fps).toBe(60);
   });
+
+  it('preserves easing on export (regression: report #3)', () => {
+    const kfs = [
+      { id: 'a', frame: 0, pose: clonePose(DEFAULT_POSE), easing: 'easeIn' as const },
+      { id: 'b', frame: 10, pose: clonePose(DEFAULT_POSE) },
+    ];
+    const clip = toAnimationClip(kfs, 30, 30);
+    expect(clip.keyframes[0].easing).toBe('easeIn');
+    expect(clip.keyframes[1].easing).toBeUndefined();
+  });
+});
+
+describe('easing round-trip (regression: report #3)', () => {
+  it('preserves valid easing values through export and import', () => {
+    const kfs = [
+      { id: 'a', frame: 0, pose: clonePose(DEFAULT_POSE), easing: 'easeInOut' as const },
+      { id: 'b', frame: 10, pose: clonePose(DEFAULT_POSE), easing: 'linear' as const },
+      { id: 'c', frame: 20, pose: clonePose(DEFAULT_POSE), easing: 'easeOut' as const },
+    ];
+    const exported = toAnimationClip(kfs, 60, 30);
+    const json = JSON.parse(JSON.stringify(exported));
+    const reimported = sanitizeClip(json);
+    expect(reimported).not.toBeNull();
+    expect(reimported!.keyframes.map((k) => k.easing)).toEqual([
+      'easeInOut',
+      'linear',
+      'easeOut',
+    ]);
+  });
+
+  it('drops unknown easing strings on import rather than passing them through', () => {
+    const clip = sanitizeClip({
+      keyframes: [
+        { frame: 0, pose: DEFAULT_POSE, easing: 'bounce' },
+      ],
+    });
+    expect(clip!.keyframes[0].easing).toBeUndefined();
+  });
+
+  it('omits the easing field when it is not set on a keyframe', () => {
+    const clip = sanitizeClip({
+      keyframes: [{ frame: 0, pose: DEFAULT_POSE }],
+    });
+    expect('easing' in clip!.keyframes[0]).toBe(false);
+  });
 });

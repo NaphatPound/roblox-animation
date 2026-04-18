@@ -130,6 +130,7 @@ export function R6Model({ pose: externalPose, interactive = true }: R6ModelProps
     selectedPart,
     setCurrentFrame,
     selectPart,
+    pause,
   } = useAnimationStore();
 
   const interpolated = useMemo(
@@ -142,7 +143,7 @@ export function R6Model({ pose: externalPose, interactive = true }: R6ModelProps
   useFrame((_, delta) => {
     if (!isPlaying) return;
     const frameDelta = delta * fps;
-    const { frame } = advanceFrame(
+    const { frame, reachedEnd } = advanceFrame(
       currentFrame,
       totalFrames,
       speed,
@@ -150,6 +151,9 @@ export function R6Model({ pose: externalPose, interactive = true }: R6ModelProps
       frameDelta
     );
     setCurrentFrame(frame);
+    if (reachedEnd && !loop) {
+      pause();
+    }
   });
 
   const select = (name: R6PartName) => {

@@ -1,5 +1,5 @@
 import type { R6Pose } from '@/types';
-import { DEFAULT_POSE, clonePose } from '@/store/useAnimationStore';
+import { DEFAULT_POSE, clonePose } from '@/lib/pose';
 
 function base(): R6Pose {
   return clonePose(DEFAULT_POSE);
@@ -73,7 +73,8 @@ export const POSE_PRESETS: Record<string, () => R6Pose> = {
     p.rightArm.rotation = { x: -150, y: 0, z: -10 };
     p.leftLeg.rotation = { x: 30, y: 0, z: 0 };
     p.rightLeg.rotation = { x: 30, y: 0, z: 0 };
-    p.torso.position = { x: 0, y: 1.5, z: 0 };
+    // Lift the rig 2 units so the feet clear the ground.
+    p.torso.position = { x: 0, y: 2, z: 0 };
     return p;
   },
 
@@ -83,7 +84,8 @@ export const POSE_PRESETS: Record<string, () => R6Pose> = {
     p.rightLeg.rotation = { x: -90, y: 0, z: 0 };
     p.leftArm.rotation = { x: -30, y: 0, z: 15 };
     p.rightArm.rotation = { x: -30, y: 0, z: -15 };
-    p.torso.position = { x: 0, y: -1, z: 0 };
+    // Drop torso so bent legs still end up on the ground plane.
+    p.torso.position = { x: 0, y: -1.5, z: 0 };
     return p;
   },
 };

@@ -1,5 +1,14 @@
-import type { AnimationClip, Keyframe, R6Pose } from '@/types';
-import { clonePose } from '@/store/useAnimationStore';
+import type { AnimationClip, EasingType, Keyframe, R6Pose } from '@/types';
+import { clonePose } from '@/lib/pose';
+
+const VALID_EASINGS: EasingType[] = ['linear', 'easeIn', 'easeOut', 'easeInOut'];
+
+function parseEasing(value: unknown): EasingType | undefined {
+  if (typeof value !== 'string') return undefined;
+  return (VALID_EASINGS as string[]).includes(value)
+    ? (value as EasingType)
+    : undefined;
+}
 
 export function isValidPose(p: unknown): p is R6Pose {
   if (!p || typeof p !== 'object') return false;
@@ -29,11 +38,14 @@ export function sanitizeClip(raw: unknown): AnimationClip | null {
     if (!item || typeof item.frame !== 'number') continue;
     if (!Number.isFinite(item.frame)) continue;
     if (!isValidPose(item.pose)) continue;
-    kfs.push({
+    const easing = parseEasing(item.easing);
+    const kf: Keyframe = {
       id: typeof item.id === 'string' ? item.id : `imported-${i}`,
       frame: Math.max(0, Math.floor(item.frame)),
       pose: clonePose(item.pose),
-    });
+    };
+    if (easing) kf.easing = easing;
+    kfs.push(kf);
   }
 
   if (kfs.length === 0) return null;
@@ -56,10 +68,14 @@ export function toAnimationClip(
     name,
     duration: totalFrames,
     fps,
-    keyframes: keyframes.map((k) => ({
-      id: k.id,
-      frame: k.frame,
-      pose: clonePose(k.pose),
-    })),
+    keyframes: keyframes.map((k) => {
+      const out: Keyframe = {
+        id: k.id,
+        frame: k.frame,
+        pose: clonePose(k.pose),
+      };
+      if (k.easing) out.easing = k.easing;
+      return out;
+    }),
   };
 }
