@@ -102,11 +102,23 @@ export const useAnimationStore = create<AnimationState>((set, get) => ({
   },
 
   moveKeyframe: (id, newFrame) => {
-    set((state) => ({
-      keyframes: state.keyframes
-        .map((kf) => (kf.id === id ? { ...kf, frame: newFrame } : kf))
-        .sort((a, b) => a.frame - b.frame),
-    }));
+    set((state) => {
+      // report05 #4: match addKeyframe's invariants — clamp to the clip
+      // range and drop any keyframe already living at the target frame
+      // so we never end up with two keyframes at the same frame.
+      const clamped = Math.max(
+        0,
+        Math.min(Math.floor(newFrame), state.totalFrames)
+      );
+      const filtered = state.keyframes.filter(
+        (kf) => kf.frame !== clamped || kf.id === id
+      );
+      return {
+        keyframes: filtered
+          .map((kf) => (kf.id === id ? { ...kf, frame: clamped } : kf))
+          .sort((a, b) => a.frame - b.frame),
+      };
+    });
   },
 
   clearKeyframes: () => {
@@ -134,6 +146,10 @@ export const useAnimationStore = create<AnimationState>((set, get) => ({
     set((state) => ({
       totalFrames: clamped,
       currentFrame: Math.min(state.currentFrame, clamped),
+      // report05 #2: drop keyframes that would live past the new end so
+      // they can't linger invisibly, leak into interpolation, or get
+      // exported with frame > duration.
+      keyframes: state.keyframes.filter((kf) => kf.frame <= clamped),
     }));
   },
 

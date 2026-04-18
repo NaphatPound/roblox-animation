@@ -28,8 +28,13 @@ export function Timeline() {
   } = useAnimationStore();
 
   const handleAddKeyframe = () => {
-    const pose = interpolatePose(keyframes, currentFrame);
-    addKeyframe(Math.round(currentFrame), pose);
+    // report05 #3: sample the pose at the SAME frame we write to. Before,
+    // `currentFrame` could be fractional during playback; we sampled at
+    // 9.6 and wrote to 10, overwriting the real frame-10 keyframe with
+    // the near-end interpolation.
+    const frame = Math.round(currentFrame);
+    const pose = interpolatePose(keyframes, frame);
+    addKeyframe(frame, pose);
   };
 
   const nearestKeyframe = keyframes.find(

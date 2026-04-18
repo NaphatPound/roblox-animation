@@ -58,18 +58,23 @@ export function Controls() {
     return () => window.removeEventListener('keydown', onKey);
   }, [setGizmoMode, selectPart]);
 
-  const currentPose = interpolatePose(keyframes, currentFrame);
+  // report05 #3: sample pose and edit at the same rounded frame. A
+  // fractional currentFrame during playback would otherwise make the
+  // sliders show an interpolated Y/Z which then gets written back into
+  // the rounded frame — silently corrupting the target keyframe.
+  const roundedFrame = Math.round(currentFrame);
+  const currentPose = interpolatePose(keyframes, roundedFrame);
   const part = selectedPart ? currentPose[selectedPart] : null;
 
   const handleChange = (axis: 'x' | 'y' | 'z', value: number) => {
     if (!selectedPart || !part) return;
     const rotation = { ...part.rotation, [axis]: value };
-    updatePartRotation(Math.round(currentFrame), selectedPart, rotation);
+    updatePartRotation(roundedFrame, selectedPart, rotation);
   };
 
   const handleReset = () => {
     if (!selectedPart) return;
-    updatePartRotation(Math.round(currentFrame), selectedPart, {
+    updatePartRotation(roundedFrame, selectedPart, {
       x: 0,
       y: 0,
       z: 0,
@@ -79,7 +84,7 @@ export function Controls() {
   const handlePreset = (key: string) => {
     const factory = POSE_PRESETS[key];
     if (!factory) return;
-    addKeyframe(Math.round(currentFrame), factory());
+    addKeyframe(roundedFrame, factory());
   };
 
   return (

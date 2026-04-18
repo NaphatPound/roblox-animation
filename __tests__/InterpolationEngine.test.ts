@@ -202,4 +202,17 @@ describe('advanceFrame', () => {
     const { reachedEnd } = advanceFrame(58, 60, 1, true, 5);
     expect(reachedEnd).toBe(true);
   });
+
+  it('lands exactly on totalFrames without wrapping (regression: report05 #1 — loop skipped the end frame)', () => {
+    // Before the fix this wrapped to 0 and the end-keyframe never rendered.
+    const { frame, reachedEnd } = advanceFrame(59, 60, 1, true, 1);
+    expect(frame).toBe(60);
+    expect(reachedEnd).toBe(false);
+  });
+
+  it('only wraps once we go strictly PAST totalFrames in loop mode', () => {
+    const { frame, reachedEnd } = advanceFrame(60, 60, 1, true, 0.5);
+    expect(frame).toBeCloseTo(0.5, 5);
+    expect(reachedEnd).toBe(true);
+  });
 });

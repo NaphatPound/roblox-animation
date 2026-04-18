@@ -93,7 +93,10 @@ export function advanceFrame(
   deltaFrames: number = 1
 ): { frame: number; reachedEnd: boolean } {
   const next = currentFrame + deltaFrames * speed;
-  if (next >= totalFrames) {
+  // report05 #1: totalFrames is the INCLUSIVE last frame. Only wrap or
+  // pause when we've gone strictly past it, so playback can actually
+  // land on and display frame === totalFrames before looping.
+  if (next > totalFrames) {
     if (loop) {
       return { frame: next % totalFrames, reachedEnd: true };
     }

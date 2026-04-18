@@ -107,6 +107,26 @@ describe('useAnimationStore', () => {
     expect(useAnimationStore.getState().currentFrame).toBe(30);
   });
 
+  it('setTotalFrames drops keyframes past the new end (regression: report05 #2)', () => {
+    useAnimationStore.getState().addKeyframe(20, DEFAULT_POSE);
+    useAnimationStore.getState().addKeyframe(50, DEFAULT_POSE);
+    useAnimationStore.getState().setTotalFrames(30);
+    const frames = useAnimationStore
+      .getState()
+      .keyframes.map((k) => k.frame);
+    expect(frames).toEqual(expect.arrayContaining([0, 20]));
+    expect(frames).not.toContain(50);
+  });
+
+  it('setTotalFrames keeps keyframes exactly on the new end (inclusive)', () => {
+    useAnimationStore.getState().addKeyframe(30, DEFAULT_POSE);
+    useAnimationStore.getState().setTotalFrames(30);
+    const frames = useAnimationStore
+      .getState()
+      .keyframes.map((k) => k.frame);
+    expect(frames).toContain(30);
+  });
+
   it('selectPart updates selection', () => {
     useAnimationStore.getState().selectPart('rightArm');
     expect(useAnimationStore.getState().selectedPart).toBe('rightArm');
@@ -231,6 +251,52 @@ describe('useAnimationStore', () => {
     expect(kf!.pose.rightArm.position).toEqual({ x: 0.5, y: 0, z: 0 });
     // other parts should stay at their default (no position set).
     expect(kf!.pose.leftArm.position).toBeUndefined();
+  });
+
+  describe('moveKeyframe (regression: report05 #4)', () => {
+    it('clamps negative destinations to 0', () => {
+      useAnimationStore.getState().clearKeyframes();
+      useAnimationStore.getState().addKeyframe(10, DEFAULT_POSE);
+      const id = useAnimationStore
+        .getState()
+        .keyframes.find((k) => k.frame === 10)!.id;
+      useAnimationStore.getState().moveKeyframe(id, -5);
+      const frames = useAnimationStore
+        .getState()
+        .keyframes.map((k) => k.frame);
+      expect(frames).not.toContain(-5);
+      expect(frames.filter((f) => f === 0)).toHaveLength(1);
+    });
+
+    it('clamps destinations past totalFrames to the clip end', () => {
+      useAnimationStore.getState().clearKeyframes();
+      useAnimationStore.getState().addKeyframe(10, DEFAULT_POSE);
+      const id = useAnimationStore
+        .getState()
+        .keyframes.find((k) => k.frame === 10)!.id;
+      useAnimationStore.getState().moveKeyframe(id, 9999);
+      const frames = useAnimationStore
+        .getState()
+        .keyframes.map((k) => k.frame);
+      expect(frames).toContain(useAnimationStore.getState().totalFrames);
+      expect(Math.max(...frames)).toBe(useAnimationStore.getState().totalFrames);
+    });
+
+    it('removes any keyframe already sitting on the destination frame', () => {
+      useAnimationStore.getState().clearKeyframes();
+      useAnimationStore.getState().addKeyframe(10, DEFAULT_POSE);
+      useAnimationStore.getState().addKeyframe(20, DEFAULT_POSE);
+      const movingId = useAnimationStore
+        .getState()
+        .keyframes.find((k) => k.frame === 20)!.id;
+      useAnimationStore.getState().moveKeyframe(movingId, 10);
+      const frames = useAnimationStore
+        .getState()
+        .keyframes.map((k) => k.frame);
+      // One kf at 10 (the moved one), the initial at 0, nothing at 20.
+      expect(frames.filter((f) => f === 10)).toHaveLength(1);
+      expect(frames).not.toContain(20);
+    });
   });
 });
 

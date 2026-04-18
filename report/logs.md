@@ -345,6 +345,37 @@ This file tracks features, bugs, fixes, and updates to the Roblox R6 AI Animator
 - `POST /api/ai-text {prompt:"military salute with the right hand"}` → `rightArm.x=-90` (arm swings forward from the right shoulder; head stays forward).
 - `npx jest` → 9 suites, 163 tests passing (5 new for the prompt contract).
 
+---
+
+### [REPORT] report05.md — 4 state-management bugs
+- Verified each against current code. All real.
+
+### [BUGFIX report05 #1] Loop no longer skips the terminal frame
+- Symptom: with loop ON, playback wrapped to 0 the instant it hit `totalFrames`, so a keyframe placed at the exact end frame never displayed during looped play.
+- Root cause: `advanceFrame` used `next >= totalFrames` — treating `totalFrames` as exclusive — while `Timeline` and keyframe editing treated it as inclusive.
+- Fix: changed to `next > totalFrames` in `components/3d/InterpolationEngine.ts`. The end frame is now a valid rendered frame; wrap/pause only fires when we've moved strictly past it.
+- Regression test: advancing from frame 59 by +1 with loop=true now lands on 60 with `reachedEnd=false` (it used to wrap to 0).
+
+### [BUGFIX report05 #2] Shrinking totalFrames no longer strands keyframes
+- Symptom: reducing the timeline from 60 → 30 after placing a keyframe at 50 left the keyframe in the store, invisible on the timeline but still in exports and still capable of affecting interpolation before the new end.
+- Fix: `setTotalFrames` in `store/useAnimationStore.ts` now filters `keyframes` to `frame <= newTotalFrames` when shrinking. Keyframes exactly on the new end survive (inclusive convention, matches bug #1 fix).
+- Regression tests: shrinking to 30 drops a frame-50 keyframe; an exactly-on-the-end keyframe survives.
+
+### [BUGFIX report05 #3] Fractional playhead edits no longer overwrite the target pose
+- Symptom: if playback paused at e.g. frame 9.6 and the user hit "Keyframe" or moved a slider, the editor sampled the pose at 9.6 (interpolated) and wrote it to `Math.round(9.6) = 10`, silently corrupting any existing frame-10 keyframe.
+- Fix: both `components/ui/Timeline.tsx` `handleAddKeyframe` and `components/ui/Controls.tsx` now snap to `roundedFrame = Math.round(currentFrame)` once and use that value for BOTH the pose sample and the write. The read/write pair is consistent.
+- (Existing test "updatePartRotation uses interpolated pose at target frame" already covers the store side; component behaviour is a one-line change and is visually deterministic.)
+
+### [BUGFIX report05 #4] `moveKeyframe` enforces clip invariants
+- Symptom: `moveKeyframe(id, frame)` blindly overwrote the `frame` field. A negative value, a value past the clip duration, or a value already occupied by another keyframe would all leak broken state into playback/marker rendering/deletion.
+- Fix: `store/useAnimationStore.ts` `moveKeyframe` now floors + clamps the destination to `[0, totalFrames]` and drops any keyframe already living at that frame (except the one being moved). Matches `addKeyframe`'s existing "one keyframe per frame" rule and `sanitizeClip`'s dedupe-by-frame rule.
+- Regression tests (3 cases): negative → 0; past-end → totalFrames; moving onto an occupied frame leaves exactly one keyframe there.
+
+### [TEST RESULT] After report05 fixes — 170/170 passed
+- `npx jest` → 9 suites, 170 tests (7 new across InterpolationEngine + useAnimationStore suites).
+- `npx tsc --noEmit` → 0 errors.
+- `npx next build` → OK.
+
 ### [BUGFIX] In-between frames didn't interpolate position when one side was unset
 - Symptom (reported by user): tweening a moved-and-rotated joint, the rotation LERPed but position snapped to whichever keyframe had the offset set — "cal only rotate".
 - Root cause: `interpolatePose` in `components/3d/InterpolationEngine.ts` only LERPed `position` when **both** keyframes had one, and otherwise fell back to `from.position || to.position` — a pure snap, not a blend. That is fine when both keyframes set a value, but falls over once the user uses the Move gizmo only on one keyframe (which is the normal case: the initial keyframe has no `position` set, the user adds one at frame 30).
