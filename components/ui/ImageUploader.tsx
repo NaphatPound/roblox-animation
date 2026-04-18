@@ -1,10 +1,18 @@
 'use client';
 
 import { useState, useRef } from 'react';
-import { Upload, Image as ImageIcon, Loader2, X } from 'lucide-react';
+import {
+  Upload,
+  Image as ImageIcon,
+  Loader2,
+  X,
+  Cloud,
+  Server,
+  AlertTriangle,
+} from 'lucide-react';
 import { useAnimationStore } from '@/store/useAnimationStore';
 import { planImportFrames } from '@/lib/imageImport';
-import type { AIPoseResponse } from '@/types';
+import type { AIPoseResult, AISource } from '@/types';
 
 export function ImageUploader() {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -12,6 +20,7 @@ export function ImageUploader() {
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [lastSource, setLastSource] = useState<AISource | null>(null);
   const { addKeyframe, totalFrames, setTotalFrames, fps, currentFrame } =
     useAnimationStore();
 
@@ -41,6 +50,7 @@ export function ImageUploader() {
     if (files.length === 0) return;
     setLoading(true);
     setError(null);
+    setLastSource(null);
     setProgress(0);
 
     try {
@@ -48,6 +58,7 @@ export function ImageUploader() {
       if (plan.lastFrame > totalFrames) {
         setTotalFrames(plan.lastFrame);
       }
+      let sawSource: AISource | null = null;
       for (let i = 0; i < files.length; i++) {
         const base64 = await fileToBase64(files[i]);
         const res = await fetch('/api/ai-vision', {
@@ -55,13 +66,21 @@ export function ImageUploader() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ imageBase64: base64 }),
         });
-        if (!res.ok) {
-          throw new Error(`Vision analysis failed on frame ${i + 1}`);
+        const data = (await res.json()) as AIPoseResult & { error?: string };
+        // Abort the batch on any non-200 (e.g. 502 when the upstream AI
+        // failed). This is the fix for report03 #1: we must never silently
+        // import fallback poses as if they were real vision output.
+        if (!res.ok || data.source === 'fallback') {
+          throw new Error(
+            data.error ||
+              `Vision analysis failed on frame ${i + 1} (HTTP ${res.status})`
+          );
         }
-        const data: AIPoseResponse = await res.json();
         addKeyframe(plan.frames[i], data.pose);
+        sawSource = data.source;
         setProgress(Math.round(((i + 1) / files.length) * 100));
       }
+      setLastSource(sawSource);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
@@ -118,7 +137,29 @@ export function ImageUploader() {
         {loading ? <Loader2 size={14} className="animate-spin" /> : <ImageIcon size={14} />}
         {loading ? `Analyzing... ${progress}%` : `Analyze ${files.length} frame(s)`}
       </button>
-      {error && <p className="text-xs text-red-400">{error}</p>}
+      {lastSource && !error && (
+        <p className="text-xs text-gray-500 flex items-center gap-1">
+          {lastSource === 'cloud' ? (
+            <>
+              <Cloud size={10} /> via Ollama Cloud
+            </>
+          ) : lastSource === 'local' ? (
+            <>
+              <Server size={10} /> via local Ollama
+            </>
+          ) : (
+            <>
+              <AlertTriangle size={10} className="text-yellow-500" /> fallback
+            </>
+          )}
+        </p>
+      )}
+      {error && (
+        <p className="text-xs text-red-400 flex items-start gap-1">
+          <AlertTriangle size={12} className="mt-0.5 flex-shrink-0" />
+          <span>{error}</span>
+        </p>
+      )}
     </div>
   );
 }

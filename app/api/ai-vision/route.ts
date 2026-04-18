@@ -13,7 +13,10 @@ export async function POST(req: NextRequest) {
     }
     const prompt = body.prompt ? body.prompt.toString() : undefined;
     const result = await generatePoseFromImage(imageBase64, prompt);
-    return NextResponse.json(result);
+    // Upstream failure — return 502 so ImageUploader's `res.ok` check
+    // aborts the batch instead of importing fallback poses silently.
+    const status = result.source === 'fallback' ? 502 : 200;
+    return NextResponse.json(result, { status });
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : 'Unknown error' },

@@ -12,7 +12,11 @@ export async function POST(req: NextRequest) {
       );
     }
     const result = await generatePoseFromText(prompt);
-    return NextResponse.json(result);
+    // Upstream failure — propagate as 502 so clients don't silently import
+    // the keyword-heuristic fallback as if it were AI output. The pose is
+    // still included so clients can degrade gracefully if they want.
+    const status = result.source === 'fallback' ? 502 : 200;
+    return NextResponse.json(result, { status });
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : 'Unknown error' },

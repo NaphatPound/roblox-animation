@@ -3,16 +3,13 @@
 import { useState } from 'react';
 import { Sparkles, Loader2, Cloud, Server, AlertTriangle } from 'lucide-react';
 import { useAnimationStore } from '@/store/useAnimationStore';
-import type { AIPoseResponse } from '@/types';
-
-type Source = 'cloud' | 'local' | 'fallback';
-type Result = AIPoseResponse & { source?: Source; error?: string };
+import type { AIPoseResult, AISource } from '@/types';
 
 export function PromptInput() {
   const [prompt, setPrompt] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [lastSource, setLastSource] = useState<Source | null>(null);
+  const [lastSource, setLastSource] = useState<AISource | null>(null);
   const { currentFrame, addKeyframe } = useAnimationStore();
 
   const handleGenerate = async () => {
@@ -25,15 +22,17 @@ export function PromptInput() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt }),
       });
-      if (!res.ok) {
-        throw new Error(`AI request failed: ${res.status}`);
+      const data = (await res.json()) as AIPoseResult & { error?: string };
+      // Route returns 502 when the upstream AI failed; surface the error and
+      // do NOT write the heuristic fallback into the timeline as if it were
+      // a real AI response.
+      if (!res.ok || data.source === 'fallback') {
+        throw new Error(
+          data.error || `AI request failed: HTTP ${res.status}`
+        );
       }
-      const data: Result = await res.json();
       addKeyframe(Math.round(currentFrame), data.pose);
-      setLastSource(data.source ?? null);
-      if (data.source === 'fallback' && data.error) {
-        setError(`Ollama call failed — using keyword fallback. (${data.error})`);
-      }
+      setLastSource(data.source);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {

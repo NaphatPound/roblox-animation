@@ -257,6 +257,43 @@ This file tracks features, bugs, fixes, and updates to the Roblox R6 AI Animator
 - First attempt used `glm-5.1:cloud` (from the user's message). Ollama Cloud returned 403 with `{"error":"model is experiencing high volume. while capacity is being added, a subscription is required for access: https://ollama.com/upgrade"}`. Switched to `gpt-oss:120b-cloud` which is on the free tier for the supplied key.
 - Browser verified end-to-end: prompt "dramatic bow, head tilted down, torso bent forward, arms hanging at sides" → POST `/api/ai-text` 200 in 7.3s → "via Ollama Cloud" hint appears → the character visibly bows forward (torso rotated forward, head down, arms following). This confirms the cloud call made it all the way back to a correct R6 pose — a prompt the keyword fallback has no keyword for, so the result could not come from the fallback path.
 
+---
+
+### [REPORT] report03.md — 4 bugs exposed by the new cloud path
+- Read and verified each bug against current code. All four real. Plus user asked for `gemma4:31b-cloud` on the vision route.
+
+### [BUGFIX report03 #1] Upstream AI failures no longer masquerade as 200 OK
+- Symptom: `/api/ai-text` and `/api/ai-vision` ALWAYS returned 200 — even when Ollama returned a 403 / invalid key / model not available. `ImageUploader` treated any 200 as success and imported the heuristic fallback pose as if it were real vision output. Particularly dangerous for batch image imports.
+- Fix: both API routes now inspect `result.source`; if it is `'fallback'`, the route returns HTTP 502 with the pose + error still in the body (so callers can degrade gracefully if they want, but the default `res.ok` check blocks silent corruption).
+- `ImageUploader` and `PromptInput` now both check `!res.ok || data.source === 'fallback'` and surface the upstream error; neither writes a fallback pose into the timeline.
+
+### [BUGFIX report03 #2] Cloud mode no longer falls through to local model names
+- Symptom: defaults were `llama3.2` / `gemma3` — local-style names. A developer who sets only `OLLAMA_API_KEY` (the documented setup) got cloud routing to *non-existent* cloud models, which 403'd, which hit the fallback silently (see #1).
+- Fix: `resolveTextModel(backend)` and `resolveVisionModel(backend)` now pick cloud-tagged defaults (`gpt-oss:120b-cloud`, `gemma4:31b-cloud`) when the resolved backend is `cloud`, and local-friendly defaults (`llama3.2`, `gemma3`) when it is `local`. Explicit `OLLAMA_TEXT_MODEL` / `OLLAMA_VISION_MODEL` always win.
+- `.env.example` updated to document the resolved defaults. `.env.local` vision model switched to `gemma4:31b-cloud` (user request).
+
+### [BUGFIX report03 #3] Cloud failure now falls back to local before the heuristic
+- Symptom: presence of `OLLAMA_API_KEY` forced cloud-only. A valid local daemon + temporary cloud outage → silent keyword fallback.
+- Fix: introduced `OLLAMA_BACKEND=auto|cloud|local` (default `auto`). `planAttempts(mode, hasKey)` returns the ordered list of attempts: `auto+key → [cloud, local]`, `auto-no-key → [local]`, `cloud+key → [cloud]`, `cloud-no-key → []`, `local → [local]`. `callOllama` walks that list and uses the first attempt that succeeds. Combined error is thrown only when every configured attempt fails.
+
+### [BUGFIX report03 #4] `source`/`error` promoted to shared types
+- `types/index.ts` now exports `AISource` and `AIPoseResult` (extends `AIPoseResponse`). Both `PromptInput` and `ImageUploader` consume `AIPoseResult`; the ad-hoc local `Result` type in `PromptInput` is gone. `ImageUploader` now also shows a "via Ollama Cloud / local / fallback" hint, matching `PromptInput`.
+
+### [TESTS] New `__tests__/ollamaBackend.test.ts`
+- 15 cases covering `resolveBackendMode`, `planAttempts`, `resolveTextModel`, `resolveVisionModel`:
+  - mode parsing (auto / cloud / local / typo → auto)
+  - attempt plans (auto+key → cloud,local; auto no-key → local; cloud no-key → []; local → local)
+  - cloud defaults end with `-cloud`, local defaults do not
+  - explicit overrides win, blank overrides treated as unset, vision default is `gemma4:31b-cloud`
+
+### [TEST RESULT] After report03 fixes — 146/146 passed
+- `npx jest` → 9 suites, 146 tests in ~1s.
+- `npx tsc --noEmit` → 0 errors.
+- `npx next build` → OK.
+- **End-to-end verified against the live cloud:**
+  - `POST /api/ai-text {prompt:"wave hello"}` → `HTTP 200`, `"source":"cloud"`, rightArm `x=-70, z=40` (real model output; not the keyword `z=150` fallback).
+  - `POST /api/ai-vision` with a 1×1 base64 PNG → `HTTP 200`, `"source":"cloud"`, cold-call ~91 s using `gemma4:31b-cloud`.
+
 ### [BUGFIX] In-between frames didn't interpolate position when one side was unset
 - Symptom (reported by user): tweening a moved-and-rotated joint, the rotation LERPed but position snapped to whichever keyframe had the offset set — "cal only rotate".
 - Root cause: `interpolatePose` in `components/3d/InterpolationEngine.ts` only LERPed `position` when **both** keyframes had one, and otherwise fell back to `from.position || to.position` — a pure snap, not a blend. That is fine when both keyframes set a value, but falls over once the user uses the Move gizmo only on one keyframe (which is the normal case: the initial keyframe has no `position` set, the user adds one at frame 30).
