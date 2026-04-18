@@ -3,6 +3,7 @@
 import { useState, useRef } from 'react';
 import { Upload, Image as ImageIcon, Loader2, X } from 'lucide-react';
 import { useAnimationStore } from '@/store/useAnimationStore';
+import { planImportFrames } from '@/lib/imageImport';
 import type { AIPoseResponse } from '@/types';
 
 export function ImageUploader() {
@@ -11,7 +12,8 @@ export function ImageUploader() {
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const { addKeyframe, totalFrames, setTotalFrames, fps } = useAnimationStore();
+  const { addKeyframe, totalFrames, setTotalFrames, fps, currentFrame } =
+    useAnimationStore();
 
   const handleFiles = (list: FileList | null) => {
     if (!list) return;
@@ -42,10 +44,9 @@ export function ImageUploader() {
     setProgress(0);
 
     try {
-      const step = Math.max(1, Math.floor(fps / 4));
-      const requiredFrames = (files.length - 1) * step;
-      if (requiredFrames > totalFrames) {
-        setTotalFrames(requiredFrames);
+      const plan = planImportFrames(files.length, currentFrame, fps);
+      if (plan.lastFrame > totalFrames) {
+        setTotalFrames(plan.lastFrame);
       }
       for (let i = 0; i < files.length; i++) {
         const base64 = await fileToBase64(files[i]);
@@ -58,7 +59,7 @@ export function ImageUploader() {
           throw new Error(`Vision analysis failed on frame ${i + 1}`);
         }
         const data: AIPoseResponse = await res.json();
-        addKeyframe(i * step, data.pose);
+        addKeyframe(plan.frames[i], data.pose);
         setProgress(Math.round(((i + 1) / files.length) * 100));
       }
     } catch (err) {

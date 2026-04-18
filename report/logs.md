@@ -218,6 +218,30 @@ This file tracks features, bugs, fixes, and updates to the Roblox R6 AI Animator
 - `npx next build` → OK.
 - Browser verified: selected Right Arm + Move → dragged the Y arrow up → right arm floated above the shoulder (and the rotation sliders correctly stayed at 0, since Move edits position only).
 
+### [REPORT] report02.md — 4 bugs after the gizmo work
+- Re-read the report and verified each against current code. Bug #1 (position snap) was already fixed in `76d6c18`; added the report's exact repro test (`position=1 → undefined` mid should be `0.5`) for symmetry with the existing `undefined → position=2` case.
+
+### [BUGFIX report02 #2] Image-to-animation import now starts at the playhead
+- Symptom: dragging the playhead to frame 30 and importing image frames still wrote keyframes at 0, step, 2*step — silently overwriting earlier keyframes.
+- Root cause: `ImageUploader` never read `currentFrame` from the store.
+- Fix: extracted the slot calculation into `lib/imageImport.ts` as `planImportFrames(count, currentFrame, fps)` → returns `{ start, step, frames, lastFrame }`. `ImageUploader` now calls `addKeyframe(plan.frames[i], pose)` and uses `plan.lastFrame` for the `totalFrames` extension.
+- Tests: new `__tests__/imageImport.test.ts` covers start-at-0, start-at-30 (exact report repro), non-integer currentFrame (rounds), negative clamp, tiny fps (step=1 floor), single-image, empty-input.
+
+### [BUGFIX report02 #3] Import now validates `position` payloads
+- Symptom: a malformed `position` like `{x: "bad", y: 0, z: 0}` passed `isValidPose` because the old check only looked at `rotation`. That bad vec would be deep-cloned into the store and leak into the renderer.
+- Fix: new exported `isValidVec3` helper — requires finite numeric `x`, `y`, `z`. `isValidPose` now checks that if `position` exists on a part, it must pass `isValidVec3`; otherwise the whole pose is invalid (and `sanitizeClip` drops that keyframe).
+- Tests: 4 new cases on `isValidVec3` (accepts, rejects non-object, rejects missing/non-numeric, rejects NaN/Infinity) + `isValidPose` case for the exact report payload + `sanitizeClip` case that drops a bad-position keyframe but keeps the good one alongside it.
+
+### [BUGFIX report02 #4] Import deduplicates duplicate frames
+- Symptom: importing a clip with two keyframes at frame 10 produced inconsistent behaviour — markers overlapped, delete only removed one at a time, interpolation depended on array order.
+- Fix: `sanitizeClip` now collects into a `Map<frame, Keyframe>` so later entries overwrite earlier ones — same "replace at the same frame" rule as the interactive `addKeyframe`.
+- Test: `sanitizeClip` with two kfs at frame 10 returns exactly one, and it's the second one (`head.rotation.x === 90`, not `10`).
+
+### [TEST RESULT] After report02 fixes — 130/130 passed
+- `npx jest` → 8 suites, 130 tests.
+- `npx tsc --noEmit` → 0 errors.
+- `npx next build` → OK.
+
 ### [BUGFIX] In-between frames didn't interpolate position when one side was unset
 - Symptom (reported by user): tweening a moved-and-rotated joint, the rotation LERPed but position snapped to whichever keyframe had the offset set — "cal only rotate".
 - Root cause: `interpolatePose` in `components/3d/InterpolationEngine.ts` only LERPed `position` when **both** keyframes had one, and otherwise fell back to `from.position || to.position` — a pure snap, not a blend. That is fine when both keyframes set a value, but falls over once the user uses the Move gizmo only on one keyframe (which is the normal case: the initial keyframe has no `position` set, the user adds one at frame 30).

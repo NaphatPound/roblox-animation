@@ -1,9 +1,29 @@
 import {
   isValidPose,
+  isValidVec3,
   sanitizeClip,
   toAnimationClip,
 } from '../lib/animationClip';
 import { DEFAULT_POSE, clonePose } from '../store/useAnimationStore';
+
+describe('isValidVec3', () => {
+  it('accepts a finite numeric Vec3', () => {
+    expect(isValidVec3({ x: 0, y: 0, z: 0 })).toBe(true);
+    expect(isValidVec3({ x: -1.5, y: 2, z: 3.14 })).toBe(true);
+  });
+  it('rejects non-object', () => {
+    expect(isValidVec3(null)).toBe(false);
+    expect(isValidVec3('bad')).toBe(false);
+  });
+  it('rejects missing/non-numeric axes', () => {
+    expect(isValidVec3({ x: 0, y: 0 })).toBe(false);
+    expect(isValidVec3({ x: 'bad', y: 0, z: 0 })).toBe(false);
+  });
+  it('rejects non-finite numbers', () => {
+    expect(isValidVec3({ x: NaN, y: 0, z: 0 })).toBe(false);
+    expect(isValidVec3({ x: Infinity, y: 0, z: 0 })).toBe(false);
+  });
+});
 
 describe('isValidPose', () => {
   it('accepts a complete R6Pose', () => {
@@ -25,6 +45,25 @@ describe('isValidPose', () => {
     const bad = clonePose(DEFAULT_POSE) as unknown as Record<string, { rotation: Record<string, unknown> }>;
     bad.head.rotation = { x: 'foo', y: 0, z: 0 };
     expect(isValidPose(bad)).toBe(false);
+  });
+
+  it('rejects a pose with a malformed position (report02 #3)', () => {
+    // exact payload from the report — a string x value on head.position.
+    const bad = {
+      head: { rotation: { x: 0, y: 0, z: 0 }, position: { x: 'bad', y: 0, z: 0 } },
+      torso: { rotation: { x: 0, y: 0, z: 0 }, position: { x: 0, y: 0, z: 0 } },
+      leftArm: { rotation: { x: 0, y: 0, z: 0 } },
+      rightArm: { rotation: { x: 0, y: 0, z: 0 } },
+      leftLeg: { rotation: { x: 0, y: 0, z: 0 } },
+      rightLeg: { rotation: { x: 0, y: 0, z: 0 } },
+    };
+    expect(isValidPose(bad)).toBe(false);
+  });
+
+  it('accepts a pose with a valid position', () => {
+    const good = clonePose(DEFAULT_POSE);
+    good.rightArm.position = { x: 0.5, y: 1.2, z: 0 };
+    expect(isValidPose(good)).toBe(true);
   });
 });
 
@@ -83,6 +122,43 @@ describe('sanitizeClip', () => {
       ],
     });
     expect(out!.keyframes.map((k) => k.frame)).toEqual([0, 15, 30]);
+  });
+
+  it('deduplicates duplicate frames, keeping the last occurrence (report02 #4)', () => {
+    const poseA = clonePose(DEFAULT_POSE);
+    poseA.head.rotation = { x: 10, y: 0, z: 0 };
+    const poseB = clonePose(DEFAULT_POSE);
+    poseB.head.rotation = { x: 90, y: 0, z: 0 };
+
+    const out = sanitizeClip({
+      keyframes: [
+        { frame: 10, pose: poseA },
+        { frame: 10, pose: poseB },
+      ],
+    });
+    expect(out!.keyframes).toHaveLength(1);
+    expect(out!.keyframes[0].pose.head.rotation.x).toBe(90);
+  });
+
+  it('drops keyframes with malformed position during import (report02 #3)', () => {
+    const good = clonePose(DEFAULT_POSE);
+    const badRaw = {
+      head: { rotation: { x: 0, y: 0, z: 0 }, position: { x: 'bad', y: 0, z: 0 } },
+      torso: { rotation: { x: 0, y: 0, z: 0 } },
+      leftArm: { rotation: { x: 0, y: 0, z: 0 } },
+      rightArm: { rotation: { x: 0, y: 0, z: 0 } },
+      leftLeg: { rotation: { x: 0, y: 0, z: 0 } },
+      rightLeg: { rotation: { x: 0, y: 0, z: 0 } },
+    };
+    const out = sanitizeClip({
+      keyframes: [
+        { frame: 0, pose: good },
+        { frame: 10, pose: badRaw },
+      ],
+    });
+    // The valid keyframe survives; the bad one is silently dropped.
+    expect(out!.keyframes).toHaveLength(1);
+    expect(out!.keyframes[0].frame).toBe(0);
   });
 
   it('falls back to defaults for missing name/duration/fps', () => {

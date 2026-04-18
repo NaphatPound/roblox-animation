@@ -113,6 +113,23 @@ describe('interpolatePose', () => {
     expect(mid.rightArm.position!.x).toBeCloseTo(0, 5);
   });
 
+  it('LERPs position back to zero (reverse direction, from report02 #1)', () => {
+    // kf A: rightArm moved to x=1; kf B: default (undefined). Mid should be x~0.5.
+    const poseA = clonePose(DEFAULT_POSE);
+    poseA.rightArm.position = { x: 1, y: 0, z: 0 };
+    const poseB = clonePose(DEFAULT_POSE);
+
+    const kf: Keyframe[] = [
+      { id: 'a', frame: 0, pose: poseA },
+      { id: 'b', frame: 30, pose: poseB },
+    ];
+
+    const mid = interpolatePose(kf, 15);
+    expect(mid.rightArm.position).toBeDefined();
+    expect(mid.rightArm.position!.x).toBeCloseTo(0.5, 5);
+    expect(mid.rightArm.position!.y).toBeCloseTo(0, 5);
+  });
+
   it('still LERPs when BOTH keyframes have a position', () => {
     const poseA = clonePose(DEFAULT_POSE);
     poseA.torso.position = { x: 0, y: 0, z: 0 };
