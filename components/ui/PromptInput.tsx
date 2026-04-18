@@ -1,14 +1,18 @@
 'use client';
 
 import { useState } from 'react';
-import { Sparkles, Loader2 } from 'lucide-react';
+import { Sparkles, Loader2, Cloud, Server, AlertTriangle } from 'lucide-react';
 import { useAnimationStore } from '@/store/useAnimationStore';
 import type { AIPoseResponse } from '@/types';
+
+type Source = 'cloud' | 'local' | 'fallback';
+type Result = AIPoseResponse & { source?: Source; error?: string };
 
 export function PromptInput() {
   const [prompt, setPrompt] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [lastSource, setLastSource] = useState<Source | null>(null);
   const { currentFrame, addKeyframe } = useAnimationStore();
 
   const handleGenerate = async () => {
@@ -24,8 +28,12 @@ export function PromptInput() {
       if (!res.ok) {
         throw new Error(`AI request failed: ${res.status}`);
       }
-      const data: AIPoseResponse = await res.json();
+      const data: Result = await res.json();
       addKeyframe(Math.round(currentFrame), data.pose);
+      setLastSource(data.source ?? null);
+      if (data.source === 'fallback' && data.error) {
+        setError(`Ollama call failed — using keyword fallback. (${data.error})`);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
@@ -54,8 +62,28 @@ export function PromptInput() {
         {loading ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
         {loading ? 'Generating...' : 'Generate Pose'}
       </button>
+      {lastSource && !error && (
+        <p className="text-xs text-gray-500 flex items-center gap-1">
+          {lastSource === 'cloud' ? (
+            <>
+              <Cloud size={10} /> via Ollama Cloud
+            </>
+          ) : lastSource === 'local' ? (
+            <>
+              <Server size={10} /> via local Ollama
+            </>
+          ) : (
+            <>
+              <AlertTriangle size={10} className="text-yellow-500" /> keyword fallback
+            </>
+          )}
+        </p>
+      )}
       {error && (
-        <p className="text-xs text-red-400">{error}</p>
+        <p className="text-xs text-red-400 flex items-start gap-1">
+          <AlertTriangle size={12} className="mt-0.5 flex-shrink-0" />
+          <span>{error}</span>
+        </p>
       )}
     </div>
   );

@@ -1,7 +1,12 @@
 import type { R6Pose, AIPoseResponse } from '@/types';
-import { DEFAULT_POSE } from '@/store/useAnimationStore';
+import { DEFAULT_POSE, clonePose } from '@/lib/pose';
 
-const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
+// Local Ollama daemon (e.g. `ollama serve`).
+const OLLAMA_LOCAL_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
+// Ollama Cloud — https://docs.ollama.com/api/authentication
+const OLLAMA_CLOUD_URL = process.env.OLLAMA_CLOUD_URL || 'https://ollama.com';
+const OLLAMA_API_KEY = process.env.OLLAMA_API_KEY || '';
+
 const OLLAMA_TEXT_MODEL = process.env.OLLAMA_TEXT_MODEL || 'llama3.2';
 const OLLAMA_VISION_MODEL = process.env.OLLAMA_VISION_MODEL || 'gemma3';
 
@@ -14,10 +19,7 @@ Rules:
 - Positive x = pitch forward, positive y = yaw right, positive z = roll right.
 - Schema: {"head":{"rotation":{"x":0,"y":0,"z":0}}, "torso":{...}, "leftArm":{...}, "rightArm":{...}, "leftLeg":{...}, "rightLeg":{...}}`;
 
-export interface OllamaPoseResult {
-  pose: R6Pose;
-  raw: string;
-}
+type Source = 'cloud' | 'local' | 'fallback';
 
 export function extractJson(text: string): unknown {
   const trimmed = text.trim();
@@ -42,14 +44,7 @@ export function normalizePose(data: unknown): R6Pose {
     'rightLeg',
   ];
   const obj = (data ?? {}) as Record<string, unknown>;
-  const result: R6Pose = {
-    head: { ...DEFAULT_POSE.head, rotation: { ...DEFAULT_POSE.head.rotation } },
-    torso: { ...DEFAULT_POSE.torso, rotation: { ...DEFAULT_POSE.torso.rotation } },
-    leftArm: { ...DEFAULT_POSE.leftArm, rotation: { ...DEFAULT_POSE.leftArm.rotation } },
-    rightArm: { ...DEFAULT_POSE.rightArm, rotation: { ...DEFAULT_POSE.rightArm.rotation } },
-    leftLeg: { ...DEFAULT_POSE.leftLeg, rotation: { ...DEFAULT_POSE.leftLeg.rotation } },
-    rightLeg: { ...DEFAULT_POSE.rightLeg, rotation: { ...DEFAULT_POSE.rightLeg.rotation } },
-  };
+  const result: R6Pose = clonePose(DEFAULT_POSE);
 
   for (const name of parts) {
     const raw = obj[name] as Record<string, unknown> | undefined;
@@ -73,35 +68,80 @@ function clampDeg(value: number): number {
   return Math.max(-180, Math.min(180, value));
 }
 
+interface OllamaGenerateBody {
+  model: string;
+  prompt: string;
+  stream: false;
+  format?: 'json';
+  images?: string[];
+}
+
+/**
+ * Pick the right Ollama endpoint + auth headers based on env:
+ * - If OLLAMA_API_KEY is set, use Ollama Cloud (https://ollama.com) with a
+ *   Bearer header — per https://docs.ollama.com/api/authentication.
+ * - Otherwise call the local daemon (default http://localhost:11434) with
+ *   no auth. Same JSON request/response shape either way.
+ */
+async function callOllama(
+  body: OllamaGenerateBody
+): Promise<{ response: string; source: Source }> {
+  const useCloud = Boolean(OLLAMA_API_KEY);
+  const baseUrl = useCloud ? OLLAMA_CLOUD_URL : OLLAMA_LOCAL_URL;
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  if (useCloud) {
+    headers.Authorization = `Bearer ${OLLAMA_API_KEY}`;
+  }
+
+  const res = await fetch(`${baseUrl}/api/generate`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(
+      `Ollama ${useCloud ? 'cloud' : 'local'} responded ${res.status}` +
+        (text ? `: ${text.slice(0, 200)}` : '')
+    );
+  }
+
+  const data = (await res.json()) as { response?: string };
+  return {
+    response: data.response || '',
+    source: useCloud ? 'cloud' : 'local',
+  };
+}
+
 export async function generatePoseFromText(
   prompt: string
-): Promise<AIPoseResponse> {
+): Promise<AIPoseResponse & { source: Source; error?: string }> {
   const fullPrompt = `${SYSTEM_PROMPT}\n\nDescription: ${prompt}\n\nJSON:`;
 
   try {
-    const res = await fetch(`${OLLAMA_URL}/api/generate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: OLLAMA_TEXT_MODEL,
-        prompt: fullPrompt,
-        stream: false,
-        format: 'json',
-      }),
+    const { response, source } = await callOllama({
+      model: OLLAMA_TEXT_MODEL,
+      prompt: fullPrompt,
+      stream: false,
+      format: 'json',
     });
-
-    if (!res.ok) {
-      throw new Error(`Ollama responded ${res.status}`);
-    }
-    const data = await res.json();
-    const raw = (data.response as string) || '';
-    const parsed = extractJson(raw);
-    return { pose: normalizePose(parsed), description: prompt };
+    const parsed = extractJson(response);
+    return {
+      pose: normalizePose(parsed),
+      description: prompt,
+      source,
+    };
   } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unknown error';
     return {
       pose: fallbackPoseFromPrompt(prompt),
       description: prompt,
       confidence: 0,
+      source: 'fallback',
+      error: message,
     };
   }
 }
@@ -109,48 +149,38 @@ export async function generatePoseFromText(
 export async function generatePoseFromImage(
   imageBase64: string,
   prompt?: string
-): Promise<AIPoseResponse> {
+): Promise<AIPoseResponse & { source: Source; error?: string }> {
   const visionPrompt = `${SYSTEM_PROMPT}\n\nAnalyze the pose in this image and return the R6 joint rotations as JSON. ${prompt || ''}`;
 
   try {
-    const res = await fetch(`${OLLAMA_URL}/api/generate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: OLLAMA_VISION_MODEL,
-        prompt: visionPrompt,
-        images: [imageBase64],
-        stream: false,
-        format: 'json',
-      }),
+    const { response, source } = await callOllama({
+      model: OLLAMA_VISION_MODEL,
+      prompt: visionPrompt,
+      images: [imageBase64],
+      stream: false,
+      format: 'json',
     });
-
-    if (!res.ok) {
-      throw new Error(`Ollama vision responded ${res.status}`);
-    }
-    const data = await res.json();
-    const raw = (data.response as string) || '';
-    const parsed = extractJson(raw);
-    return { pose: normalizePose(parsed), description: prompt };
+    const parsed = extractJson(response);
+    return {
+      pose: normalizePose(parsed),
+      description: prompt,
+      source,
+    };
   } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unknown error';
     return {
       pose: fallbackPoseFromPrompt(prompt || 'idle'),
       description: prompt,
       confidence: 0,
+      source: 'fallback',
+      error: message,
     };
   }
 }
 
 export function fallbackPoseFromPrompt(prompt: string): R6Pose {
   const p = prompt.toLowerCase();
-  const base: R6Pose = {
-    head: { ...DEFAULT_POSE.head, rotation: { ...DEFAULT_POSE.head.rotation } },
-    torso: { ...DEFAULT_POSE.torso, rotation: { ...DEFAULT_POSE.torso.rotation } },
-    leftArm: { ...DEFAULT_POSE.leftArm, rotation: { ...DEFAULT_POSE.leftArm.rotation } },
-    rightArm: { ...DEFAULT_POSE.rightArm, rotation: { ...DEFAULT_POSE.rightArm.rotation } },
-    leftLeg: { ...DEFAULT_POSE.leftLeg, rotation: { ...DEFAULT_POSE.leftLeg.rotation } },
-    rightLeg: { ...DEFAULT_POSE.rightLeg, rotation: { ...DEFAULT_POSE.rightLeg.rotation } },
-  };
+  const base: R6Pose = clonePose(DEFAULT_POSE);
 
   const isLeft = p.includes('left');
   if (p.includes('punch') || p.includes('hook') || p.includes('jab')) {

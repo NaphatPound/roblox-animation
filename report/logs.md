@@ -242,6 +242,21 @@ This file tracks features, bugs, fixes, and updates to the Roblox R6 AI Animator
 - `npx tsc --noEmit` → 0 errors.
 - `npx next build` → OK.
 
+---
+
+### [FEATURE] Text-to-Animation now routes through Ollama Cloud
+- User reported: Text-to-Animation button ran but the animation didn't change. Root cause: local Ollama wasn't running, so `generatePoseFromText` fell through to `fallbackPoseFromPrompt`, which for most free-form prompts returns `DEFAULT_POSE` — identical to the existing pose, so the user saw no visible change.
+- Fix: extended `lib/ollama.ts` with a `callOllama(body)` helper that picks between:
+  - **Ollama Cloud** when `OLLAMA_API_KEY` is set — `POST https://ollama.com/api/generate` with `Authorization: Bearer <key>` (per https://docs.ollama.com/api/authentication).
+  - **Local daemon** otherwise — `http://localhost:11434` with no auth.
+  - Same JSON request/response shape on both sides (model, prompt, stream=false, optional format='json'/images[]).
+- Error surfacing: `generatePoseFromText` / `generatePoseFromImage` now return a typed `source: 'cloud' | 'local' | 'fallback'` plus an `error?: string`. `PromptInput` shows a small "via Ollama Cloud" / "keyword fallback" hint and a red warning when the cloud call fails, including the upstream error message. The user can now tell at a glance whether the AI actually ran.
+- Config surface:
+  - `.env.local` (gitignored) holds `OLLAMA_API_KEY`, `OLLAMA_TEXT_MODEL`, `OLLAMA_VISION_MODEL`.
+  - `.env.example` (committed) documents the same keys + defaults + notes about free-tier cloud models.
+- First attempt used `glm-5.1:cloud` (from the user's message). Ollama Cloud returned 403 with `{"error":"model is experiencing high volume. while capacity is being added, a subscription is required for access: https://ollama.com/upgrade"}`. Switched to `gpt-oss:120b-cloud` which is on the free tier for the supplied key.
+- Browser verified end-to-end: prompt "dramatic bow, head tilted down, torso bent forward, arms hanging at sides" → POST `/api/ai-text` 200 in 7.3s → "via Ollama Cloud" hint appears → the character visibly bows forward (torso rotated forward, head down, arms following). This confirms the cloud call made it all the way back to a correct R6 pose — a prompt the keyword fallback has no keyword for, so the result could not come from the fallback path.
+
 ### [BUGFIX] In-between frames didn't interpolate position when one side was unset
 - Symptom (reported by user): tweening a moved-and-rotated joint, the rotation LERPed but position snapped to whichever keyframe had the offset set — "cal only rotate".
 - Root cause: `interpolatePose` in `components/3d/InterpolationEngine.ts` only LERPed `position` when **both** keyframes had one, and otherwise fell back to `from.position || to.position` — a pure snap, not a blend. That is fine when both keyframes set a value, but falls over once the user uses the Move gizmo only on one keyframe (which is the normal case: the initial keyframe has no `position` set, the user adds one at frame 30).
