@@ -9,7 +9,8 @@ This document lists advanced features and architectural improvements to take the
 - **Video-to-Motion (Markerless Mocap):** Instead of just static images, allow users to upload a short video. Use a library like MediaPipe (running in a Web Worker) to extract 3D joint data and map it to the R6 rig.
 
 ## 🛠️ Professional Animation Tools
-- **Inverse Kinematics (IK):** Implement IK for arms and legs. Instead of rotating the shoulder (FK), the user can pull the hand/foot to a position, and the elbow/knee will calculate its position automatically.
+- **Inverse Kinematics (IK):** Implement IK for arms and legs. Instead of rotating the shoulder (FK), the user can pull the hand/foot to a position, and the elbow/knee will calculate its position automatically. 
+  - **Status:** Detailed task defined in `task/task01.md`.
 - **Onion Skinning:** Display a semi-transparent "ghost" of the character at the previous and next keyframes to help with timing and spacing.
 - **Graph Editor:** A visual editor for animation curves (Ease-In, Ease-Out, Custom Bezier) to give users precise control over the interpolation between keyframes.
 - **Pose Library:** Save specific poses (e.g., "Victory Pose", "Defensive Stance") to a local library for quick reuse across different animations.

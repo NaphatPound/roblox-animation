@@ -18,6 +18,7 @@ Create a web-based platform for creating smooth, high-quality animations for Rob
     - Use **SLERP (Spherical Linear Interpolation)** with Quaternions for natural-looking limb rotations.
     - Use **LERP (Linear Interpolation)** for smooth position transitions.
     - Automated calculation of missing frames between keyframes to ensure fluidity.
+- **In-Canvas Gizmos:** Direct manipulation of body parts using rotation and translation handles in the 3D viewport.
 
 ### 3. Advanced 3D Viewport
 - Real-time 3D rendering using Three.js and React Three Fiber.
@@ -28,30 +29,30 @@ Create a web-based platform for creating smooth, high-quality animations for Rob
 - **3D Engine:** Three.js, `@react-three/fiber` (R3F), `@react-three/drei`.
 - **State Management:** Zustand (optimized for frequent animation state updates).
 - **AI Backend:** Ollama Local API (running Gemma Vision, PaliGemma, or LLaVA).
-- **Styling:** Vanilla CSS or Tailwind CSS (as per preference).
+- **Styling:** Tailwind CSS.
 
-## 📂 Proposed Project Structure
+## 📂 Current Project Structure
 ```text
 roblox-r6-animator/
 ├── app/
 │   ├── api/
-│   │   ├── ai-vision/     # Image analysis API
-│   │   └── ai-text/       # Text-to-animation API
-│   ├── page.tsx           # Main Studio UI (Timeline + Viewport)
+│   │   ├── ai-vision/           # Image analysis API
+│   │   └── ai-text/             # Text-to-animation API
+│   ├── page.tsx                 # Main Studio UI (Timeline + Viewport)
 ├── components/
 │   ├── 3d/
-│   │   ├── R6Model.tsx    # R6 Rig and Logic
-│   │   ├── Scene.tsx      # Canvas and Environment
-│   │   └── Interpolation.ts # Math for smooth movement
+│   │   ├── R6Model.tsx          # R6 Rig and Logic
+│   │   ├── Scene.tsx            # Canvas and Environment
+│   │   └── InterpolationEngine.ts # Math for smooth movement
 │   ├── ui/
-│   │   ├── Timeline.tsx   # Animation controls
-│   │   └── Controls.tsx   # AI Prompt and Uploaders
+│   │   ├── Timeline.tsx         # Animation controls
+│   │   └── Controls.tsx         # AI Prompt and Uploaders
 ├── store/
-│   └── useAnimStore.ts    # Global state for keyframes
+│   └── useAnimationStore.ts     # Global state for keyframes
 └── utils/
-    └── math.ts            # SLERP/LERP helper functions
+    └── mathUtils.ts             # SLERP/LERP/Euler helper functions
 ```
 
 ## 🧠 Core Mathematical Principles
 - **Quaternions over Euler Angles:** To avoid Gimbal Lock and ensure smooth, 360-degree rotations.
-- **Automated Inbetweening:** The engine should automatically fill frames between user-defined (or AI-defined) keyframes using mathematical formulas to maintain a high frame rate.
+- **Automated Inbetweening:** The engine automatically fills frames between user-defined (or AI-defined) keyframes using mathematical formulas to maintain a high frame rate.

@@ -217,3 +217,10 @@ This file tracks features, bugs, fixes, and updates to the Roblox R6 AI Animator
 - `npx tsc --noEmit` → 0 errors.
 - `npx next build` → OK.
 - Browser verified: selected Right Arm + Move → dragged the Y arrow up → right arm floated above the shoulder (and the rotation sliders correctly stayed at 0, since Move edits position only).
+
+### [BUGFIX] In-between frames didn't interpolate position when one side was unset
+- Symptom (reported by user): tweening a moved-and-rotated joint, the rotation LERPed but position snapped to whichever keyframe had the offset set — "cal only rotate".
+- Root cause: `interpolatePose` in `components/3d/InterpolationEngine.ts` only LERPed `position` when **both** keyframes had one, and otherwise fell back to `from.position || to.position` — a pure snap, not a blend. That is fine when both keyframes set a value, but falls over once the user uses the Move gizmo only on one keyframe (which is the normal case: the initial keyframe has no `position` set, the user adds one at frame 30).
+- Fix: if **either** side has a position, treat the missing side as `{x:0, y:0, z:0}` and LERP. Preserves `position = undefined` only when neither keyframe sets one (so default rigging still skips the field on export).
+- Regression tests added in `__tests__/InterpolationEngine.test.ts`: LERPs from zero when only one side has position (the reported bug), still LERPs when both sides have position, and keeps `position` undefined when neither side sets it.
+- Tests: 114 passing.

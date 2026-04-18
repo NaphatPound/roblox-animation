@@ -66,11 +66,14 @@ export function interpolatePose(
 
     const rotation: Vec3 = slerpEuler(from.rotation, to.rotation, t);
 
+    // Treat missing position as the zero-offset default so that a keyframe
+    // with a position and a keyframe without still LERP smoothly (instead
+    // of snapping to whichever side has the value set).
     let position: Vec3 | undefined;
-    if (from.position && to.position) {
-      position = lerpVec3(from.position, to.position, t);
-    } else {
-      position = from.position || to.position;
+    if (from.position || to.position) {
+      const fromPos = from.position || { x: 0, y: 0, z: 0 };
+      const toPos = to.position || { x: 0, y: 0, z: 0 };
+      position = lerpVec3(fromPos, toPos, t);
     }
 
     result[name] = {

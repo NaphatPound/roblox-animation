@@ -93,6 +93,50 @@ describe('interpolatePose', () => {
     expect(kf[0].pose.rightArm.rotation.x).toBe(0);
     expect(kf[1].pose.rightArm.rotation.x).toBe(90);
   });
+
+  it('LERPs position from zero when one keyframe has no position (regression: snap bug)', () => {
+    // kf A: rightArm default (no position set → zero offset)
+    // kf B: rightArm moved up by y=2
+    // Halfway should be y=1, not y=2 (would be snap bug).
+    const poseA = clonePose(DEFAULT_POSE);
+    const poseB = clonePose(DEFAULT_POSE);
+    poseB.rightArm.position = { x: 0, y: 2, z: 0 };
+
+    const kf: Keyframe[] = [
+      { id: 'a', frame: 0, pose: poseA },
+      { id: 'b', frame: 10, pose: poseB },
+    ];
+
+    const mid = interpolatePose(kf, 5);
+    expect(mid.rightArm.position).toBeDefined();
+    expect(mid.rightArm.position!.y).toBeCloseTo(1, 5);
+    expect(mid.rightArm.position!.x).toBeCloseTo(0, 5);
+  });
+
+  it('still LERPs when BOTH keyframes have a position', () => {
+    const poseA = clonePose(DEFAULT_POSE);
+    poseA.torso.position = { x: 0, y: 0, z: 0 };
+    const poseB = clonePose(DEFAULT_POSE);
+    poseB.torso.position = { x: 0, y: 4, z: 0 };
+
+    const kf: Keyframe[] = [
+      { id: 'a', frame: 0, pose: poseA },
+      { id: 'b', frame: 10, pose: poseB },
+    ];
+    const mid = interpolatePose(kf, 5);
+    expect(mid.torso.position!.y).toBeCloseTo(2, 5);
+  });
+
+  it('leaves position undefined when NEITHER keyframe set one for that part', () => {
+    const poseA = clonePose(DEFAULT_POSE); // no leftArm.position
+    const poseB = clonePose(DEFAULT_POSE); // no leftArm.position
+    const kf: Keyframe[] = [
+      { id: 'a', frame: 0, pose: poseA },
+      { id: 'b', frame: 10, pose: poseB },
+    ];
+    const mid = interpolatePose(kf, 5);
+    expect(mid.leftArm.position).toBeUndefined();
+  });
 });
 
 describe('advanceFrame', () => {
