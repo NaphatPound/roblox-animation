@@ -409,6 +409,49 @@ This file tracks features, bugs, fixes, and updates to the Roblox R6 AI Animator
 - `npx next build` → OK.
 - `document/plan.md` updated: both remaining Phase 6 checkboxes (IK, Undo/Redo) are now ticked.
 
+---
+
+### [REPORT] report06.md — 4 IK review bugs
+- All 4 verified as real. Fix order: bake-scope, head-look, torso rotation, reset-root.
+
+### [BUGFIX report06 #1] Bake only solves the handles the user touched
+- Symptom: `bakeIkToCurrentFrame` built `targetMap` from every entry in `IK_HANDLES`, so tweaking only `rightHand` still overwrote `leftArm`, both legs, and the head with whatever default target positions happened to be in the store.
+- Fix: store now tracks `activeIkHandles: Set<IKHandleName>`. `setIkTarget(handle, ...)` adds the handle. `resetIkTargets` clears the set. `bakeIkToCurrentFrame` only includes active handles (and is a no-op if the set is empty). UI: each handle row is dimmed with a grey dot when inactive, cyan dot when active; the Bake button is disabled + labelled `Bake (n)` to show how many will be solved.
+- Regression test: clear keyframes, touch only `rightHand`, bake at frame 5. Asserts `rightArm.z > 0` (solved) AND every other joint's rotation is exactly `{x:0, y:0, z:0}` (untouched). Also: bake with no active handles is a no-op — no keyframe written.
+
+### [BUGFIX report06 #2] Dedicated head-look solver (yaw + pitch, not limb roll)
+- Symptom: `headLook` went through `solveLimbIK`, which decomposes a target into pitch-X and roll-Z — appropriate for a hanging cylindrical limb, nonsensical for a face. A target to character-right produced a sideways head tilt (`rotation.z`) instead of a yaw (`rotation.y`).
+- Fix: new `solveHeadLook(target, root, torsoRotation)` in `lib/rig/r6IkSolver.ts`. It treats the face as pointing along local +Z and solves:
+  - `yaw = atan2(dir.x, dir.z)` — `head.y = +90` turns face from +Z to +X (character right), matching Three.js right-handed rotation around +Y and the system-prompt convention.
+  - `pitch = atan2(-dir.y, horizontalLength)` — positive pitch is chin-down.
+  - Output clamps to `|yaw| ≤ 80°` and `|pitch| ≤ 60°` (sensible human range); reports `clamped: true` when hit.
+- `solveIKPose` routes `headLook` through the new solver; all other handles still use `solveLimbIK`.
+- Regression tests: target-right → positive `y`, near-zero `z`; target-left → negative `y`; target-below → positive `x`; target-behind → yaw clamped to ±80°.
+
+### [BUGFIX report06 #3] Reset IK targets respects the current torso root
+- Symptom: `resetIkTargets` called `defaultIKTargets()` with an implicit `(0,0,0)` root. After a jump or crouch (non-zero `torso.position`), Reset produced targets around the world origin, not around the moved character.
+- Fix: `resetIkTargets` now reads the current frame's pose (existing keyframe or interpolated), extracts `pose.torso.position`, and calls `defaultIKTargets(torsoRoot)` with that value. Also clears `activeIkHandles`.
+- Regression tests: add a keyframe with `torso.y = 2`, call reset at that frame — the new `rightHand.y` is offset by +2 relative to the unlifted default. Second test: reset clears the active-handle set.
+
+### [BUGFIX report06 #4] IK solver honours torso rotation
+- Symptom: solver computed `anchorWorld = anchorLocal + torsoRoot` and solved in world coordinates. If `torso.rotation.y = 45°`, the rig visibly twisted but the solver still used the unrotated shoulder/hip anchors — so dragged targets pulled the arms off the visible torso.
+- Fix:
+  - New `conjugateQuaternion` and `rotateVec3` helpers in `utils/mathUtils.ts` (vector rotation by a unit quaternion).
+  - New internal `worldToTorsoLocal(target, root, rotation)` pushes a world-space target into torso-local space by subtracting root then rotating by the torso's inverse (conjugate) quaternion.
+  - `solveLimbIK` now accepts `torsoRotation` and pre-transforms the target before `directionToEuler`. The limb solver still runs in the simple torso-local frame — joint anchors and rest directions are already expressed there.
+  - `solveIKPose` passes `basePose.torso.rotation` through to every limb solve.
+- Regression test: torso twisted `y = 90°`. A world target in front of the rotated shoulder (`+X` world) must map to "forward" in torso-local space and produce `rightArm.rotation.x ≈ -90°` — same pose as if the torso were unrotated.
+
+### [TESTS] New cases
+- `__tests__/mathUtils.test.ts`: `conjugateQuaternion` sign flip; `rotateVec3` identity / +X→-Z at Y=90° / round-trip with conjugate.
+- `__tests__/r6IkSolver.test.ts`: 4 head-look cases, 1 torso-rotation case.
+- `__tests__/useAnimationStore.test.ts`: bake-scoped-to-touched, bake-with-no-active-handles is a no-op, head-look bakes yaw not roll, reset seeds from current torso root, reset clears active set.
+
+### [TEST RESULT] After report06 fixes — 208/208 passed
+- `npx jest` → 11 suites, 208 tests (13 new).
+- `npx tsc --noEmit` → 0 errors.
+- `npx next build` → OK (bundle /page now 13.8 kB with the IK panel state/UI).
+
 ### [BUGFIX] In-between frames didn't interpolate position when one side was unset
 - Symptom (reported by user): tweening a moved-and-rotated joint, the rotation LERPed but position snapped to whichever keyframe had the offset set — "cal only rotate".
 - Root cause: `interpolatePose` in `components/3d/InterpolationEngine.ts` only LERPed `position` when **both** keyframes had one, and otherwise fell back to `from.position || to.position` — a pure snap, not a blend. That is fine when both keyframes set a value, but falls over once the user uses the Move gizmo only on one keyframe (which is the normal case: the initial keyframe has no `position` set, the user adds one at frame 30).

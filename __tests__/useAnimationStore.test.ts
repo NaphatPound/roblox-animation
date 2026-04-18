@@ -16,6 +16,7 @@ function resetStore() {
     selectedPart: null,
     gizmoMode: 'rotate',
     editMode: 'fk',
+    activeIkHandles: new Set(),
     history: [],
     future: [],
   });
@@ -324,10 +325,9 @@ describe('useAnimationStore', () => {
   });
 
   describe('bakeIkToCurrentFrame', () => {
-    it('solves the right hand target and writes a keyframe', () => {
+    it('solves only the touched right-hand target (report06 #1)', () => {
       useAnimationStore.getState().clearKeyframes();
       useAnimationStore.getState().setCurrentFrame(5);
-      // Move right hand 2 studs outward (character's right).
       const defaults = useAnimationStore.getState().ikTargets;
       useAnimationStore.getState().setIkTarget('rightHand', {
         x: defaults.rightHand.x + 2,
@@ -339,8 +339,80 @@ describe('useAnimationStore', () => {
         .getState()
         .keyframes.find((k) => k.frame === 5);
       expect(kf).toBeDefined();
-      // Solver raised the right arm outward — z should be positive (character-right).
       expect(kf!.pose.rightArm.rotation.z).toBeGreaterThan(0);
+      // Untouched joints must stay at their base pose (all zeros from the
+      // fresh clearKeyframes() seed). Before report06 #1 they would all
+      // have been overwritten with default-target solves.
+      expect(kf!.pose.leftArm.rotation).toEqual({ x: 0, y: 0, z: 0 });
+      expect(kf!.pose.leftLeg.rotation).toEqual({ x: 0, y: 0, z: 0 });
+      expect(kf!.pose.rightLeg.rotation).toEqual({ x: 0, y: 0, z: 0 });
+      expect(kf!.pose.head.rotation).toEqual({ x: 0, y: 0, z: 0 });
+    });
+
+    it('is a no-op when no handles have been touched', () => {
+      useAnimationStore.getState().clearKeyframes();
+      useAnimationStore.getState().setCurrentFrame(5);
+      const before = useAnimationStore.getState().keyframes;
+      useAnimationStore.getState().bakeIkToCurrentFrame();
+      // Nothing was touched — no new keyframe should be written.
+      expect(
+        useAnimationStore
+          .getState()
+          .keyframes.some((k) => k.frame === 5)
+      ).toBe(false);
+      // State shouldn't have changed identity either.
+      expect(useAnimationStore.getState().keyframes).toBe(before);
+    });
+
+    it('headLook produces a yaw, not a sideways roll (report06 #2)', () => {
+      useAnimationStore.getState().clearKeyframes();
+      useAnimationStore.getState().setCurrentFrame(0);
+      const defaults = useAnimationStore.getState().ikTargets;
+      // Push the head-look target to the character's right.
+      useAnimationStore.getState().setIkTarget('headLook', {
+        x: defaults.headLook.x + 5,
+        y: defaults.headLook.y,
+        z: defaults.headLook.z,
+      });
+      useAnimationStore.getState().bakeIkToCurrentFrame();
+      const kf = useAnimationStore
+        .getState()
+        .keyframes.find((k) => k.frame === 0);
+      expect(kf).toBeDefined();
+      // y should take the turn, z should stay ~0 (previously it was
+      // routed through the limb-roll solver and picked up a Z tilt).
+      expect(kf!.pose.head.rotation.y).not.toBe(0);
+      expect(Math.abs(kf!.pose.head.rotation.z)).toBeLessThan(1);
+    });
+  });
+
+  describe('resetIkTargets (report06 #3)', () => {
+    it('seeds target positions relative to the current torso position', () => {
+      useAnimationStore.getState().clearKeyframes();
+      // Lift the torso 2 studs (like a jump) at frame 0.
+      const lifted = clonePose(DEFAULT_POSE);
+      lifted.torso.position = { x: 0, y: 2, z: 0 };
+      useAnimationStore.getState().addKeyframe(0, lifted);
+      useAnimationStore.getState().setCurrentFrame(0);
+      useAnimationStore.getState().resetIkTargets();
+      const targets = useAnimationStore.getState().ikTargets;
+      // Right-hand neutral tip is 2 studs below the shoulder. Before
+      // the fix, reset returned the origin-based tip; now it must be
+      // offset by the lifted torso root.
+      expect(targets.rightHand.y).toBeCloseTo(1.0 + 2 - 2, 5); // anchor Y=1, +root.y=2, -limbLen=2 → y=1
+    });
+
+    it('reset clears the active-handle set', () => {
+      useAnimationStore.getState().setIkTarget('rightHand', {
+        x: 0,
+        y: 0,
+        z: 0,
+      });
+      expect(useAnimationStore.getState().activeIkHandles.has('rightHand')).toBe(
+        true
+      );
+      useAnimationStore.getState().resetIkTargets();
+      expect(useAnimationStore.getState().activeIkHandles.size).toBe(0);
     });
   });
 

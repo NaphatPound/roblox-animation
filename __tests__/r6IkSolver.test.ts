@@ -1,6 +1,7 @@
 import {
   compensateTorso,
   directionToEuler,
+  solveHeadLook,
   solveIKPose,
   solveLimbIK,
 } from '../lib/rig/r6IkSolver';
@@ -111,6 +112,60 @@ describe('solveIKPose (full-pose solve)', () => {
       rightHand: { x: 50, y: 0, z: 0 },
     });
     expect(clamped.rightHand).toBe(true);
+  });
+});
+
+describe('solveHeadLook (report06 #2 — yaw/pitch, not limb roll)', () => {
+  it('target to the character-right yields positive y yaw, zero z roll', () => {
+    const anchor = JOINT_ANCHORS.head;
+    const target = { x: anchor.x + 5, y: anchor.y, z: anchor.z };
+    const { rotation } = solveHeadLook(target);
+    expect(rotation.y).toBeGreaterThan(0);
+    expect(rotation.z).toBeCloseTo(0, 3);
+  });
+
+  it('target to the character-left yields negative y yaw', () => {
+    const anchor = JOINT_ANCHORS.head;
+    const target = { x: anchor.x - 5, y: anchor.y, z: anchor.z };
+    const { rotation } = solveHeadLook(target);
+    expect(rotation.y).toBeLessThan(0);
+  });
+
+  it('target below the head yields positive x pitch (chin-down)', () => {
+    const anchor = JOINT_ANCHORS.head;
+    const target = { x: anchor.x, y: anchor.y - 5, z: anchor.z + 1 };
+    const { rotation } = solveHeadLook(target);
+    expect(rotation.x).toBeGreaterThan(0);
+  });
+
+  it('clamps to sensible human limits (≤ 80° yaw, ≤ 60° pitch)', () => {
+    const anchor = JOINT_ANCHORS.head;
+    // Directly behind the head — would require 180° yaw without clamp.
+    const target = { x: anchor.x, y: anchor.y, z: anchor.z - 5 };
+    const { rotation, clamped } = solveHeadLook(target);
+    expect(Math.abs(rotation.y)).toBeLessThanOrEqual(80);
+    expect(clamped).toBe(true);
+  });
+});
+
+describe('solveLimbIK with torso rotation (report06 #4)', () => {
+  it('respects torso yaw when locating the shoulder', () => {
+    // Rotate torso 90° around Y (facing character-right instead of +Z).
+    const torsoRotation = { x: 0, y: 90, z: 0 };
+    const torsoRoot = { x: 0, y: 0, z: 0 };
+    // A target that is FORWARD relative to the rotated torso is +X in world.
+    // World-space target directly in front of the rotated shoulder.
+    const worldTarget = { x: 2, y: JOINT_ANCHORS.rightArm.y, z: 0 };
+    const { rotation } = solveLimbIK(
+      'rightArm',
+      worldTarget,
+      torsoRoot,
+      torsoRotation
+    );
+    // In the torso-local frame, this target is forward (+Z local), so
+    // the arm should pitch forward (x ≈ -90), regardless of the world
+    // rotation.
+    expect(rotation.x).toBeCloseTo(-90, 1);
   });
 });
 

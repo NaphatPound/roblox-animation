@@ -7,7 +7,12 @@ import {
   IK_HANDLE_TO_PART,
   type IKHandleName,
 } from '@/lib/rig/r6Rig';
-import { radToDeg } from '@/utils/mathUtils';
+import {
+  conjugateQuaternion,
+  eulerToQuaternion,
+  radToDeg,
+  rotateVec3,
+} from '@/utils/mathUtils';
 
 function sub(a: Vec3, b: Vec3): Vec3 {
   return { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z };
@@ -23,41 +28,25 @@ function normalise(v: Vec3): Vec3 {
   return { x: v.x / len, y: v.y / len, z: v.z / len };
 }
 
+function clampTo(value: number, absLimit: number): number {
+  return Math.max(-absLimit, Math.min(absLimit, value));
+}
+
 /**
  * Build a local Euler rotation (degrees, XYZ order) that rotates the
  * rest direction `from` onto the target direction `to`.
  *
  * For R6 limbs the rest direction is (0, -1, 0) (hanging straight down).
- * We decompose the rotation into:
- *   - pitch around local X (how far forward/back the limb swings)
- *   - roll around local Z  (how far outward the limb swings)
- * We leave local Y (twist) at zero — R6 limbs are rigid cylinders so
- * twist has no visible effect on the end-effector position.
+ * We decompose the rotation into pitch (local X) + roll (local Z) — the
+ * character's right/left reach and forward/back reach. Twist (local Y)
+ * is irrelevant on a rigid cylindrical limb so it stays zero.
  */
 export function directionToEuler(from: Vec3, to: Vec3): Vec3 {
   const a = normalise(from);
   const b = normalise(to);
-  // If target is zero or coincident with rest, no rotation is needed.
   if (length(a) < 1e-9 || length(b) < 1e-9) {
     return { x: 0, y: 0, z: 0 };
   }
-  // Rotation around X: tilt from the Y-Z plane.
-  //   Starting from (0, -1, 0), a rotation of +theta around +X moves
-  //   the tip to (0, -cos(theta), +sin(theta)).
-  //   So pitchX = atan2(b.z, -b.y)  (assuming rest -Y convention).
-  // Rotation around Z: tilt from the X-Y plane.
-  //   Starting from (0, -1, 0), a rotation of +psi around +Z moves the
-  //   tip to (sin(psi), -cos(psi), 0).
-  //   So rollZ = atan2(b.x, -b.y).
-  // Because we solve one limb at a time and twist (Y) is irrelevant,
-  // we approximate by taking pitchX from the YZ projection and rollZ
-  // from the XY projection. This yields (xDeg, 0, zDeg).
-  // For arbitrary 3-D targets this is an approximation that gives a
-  // decent visual solution; the limb will aim toward `to` closely
-  // enough for R6's rigid-segment rig.
-
-  // Use the rest direction sign to adapt: if rest dir points +Y (head),
-  // invert the mapping.
   const restIsUp = a.y > 0.5;
   // JS quirk: Math.atan2(0, -0) === Math.PI, which leaks π into a
   // "no rotation" result whenever b.y is exactly 0 and the result
@@ -66,14 +55,11 @@ export function directionToEuler(from: Vec3, to: Vec3): Vec3 {
   const negY = -b.y || 0;
 
   if (restIsUp) {
-    // Rest (0,+1,0) → rotate around +X by pitch lands at (0,cos,sin).
     const pitchX = Math.atan2(b.z, posY);
     const rollZ = Math.atan2(-b.x, posY);
     return { x: radToDeg(pitchX), y: 0, z: radToDeg(rollZ) };
   }
 
-  // Rest (0,-1,0) → rotate around +X by pitch lands at (0,-cos,-sin).
-  // Target (0,0,1) wants sin=-1 → pitch = -π/2 (arm swings forward).
   const pitchX = Math.atan2(-b.z, negY);
   const rollZ = Math.atan2(b.x, negY);
   return { x: radToDeg(pitchX), y: 0, z: radToDeg(rollZ) };
@@ -92,33 +78,93 @@ function clampTargetToReach(anchor: Vec3, target: Vec3, reach: number): Vec3 {
 }
 
 export interface LimbSolveResult {
-  rotation: Vec3; // Euler degrees, XYZ
-  clamped: boolean; // true if target was outside reach
+  rotation: Vec3;
+  clamped: boolean;
+}
+
+/**
+ * Transform a world-space target into the torso's local frame. Lets the
+ * limb solver work as if the torso were at the origin with identity
+ * rotation, matching how R6Model nests joints inside the torso group.
+ *
+ * report06 #4 — before this, anchorWorld = anchorLocal + torsoRoot
+ * ignored torso rotation, so any twisted-torso pose solved against the
+ * wrong shoulder/hip positions.
+ */
+function worldToTorsoLocal(
+  target: Vec3,
+  torsoRoot: Vec3,
+  torsoRotation: Vec3
+): Vec3 {
+  const t = sub(target, torsoRoot);
+  // Undo the torso rotation by rotating with its conjugate.
+  const q = conjugateQuaternion(eulerToQuaternion(torsoRotation));
+  return rotateVec3(t, q);
 }
 
 /**
  * One-bone IK — rotate a limb from its rest direction toward the target.
- * Works in the rig-local frame (torso origin at world zero).
+ * Works in the rig-local frame (torso origin at world zero, torso
+ * rotation as identity).
  */
 export function solveLimbIK(
   part: R6PartName,
   target: Vec3,
-  torsoRoot: Vec3 = { x: 0, y: 0, z: 0 }
+  torsoRoot: Vec3 = { x: 0, y: 0, z: 0 },
+  torsoRotation: Vec3 = { x: 0, y: 0, z: 0 }
 ): LimbSolveResult {
-  const anchorLocal = JOINT_ANCHORS[part];
-  const anchorWorld: Vec3 = {
-    x: anchorLocal.x + torsoRoot.x,
-    y: anchorLocal.y + torsoRoot.y,
-    z: anchorLocal.z + torsoRoot.z,
-  };
+  const anchor = JOINT_ANCHORS[part];
   const reach = LIMB_LENGTHS[part];
-  const clampedTarget = clampTargetToReach(anchorWorld, target, reach);
-  const clamped = clampedTarget !== target;
 
-  const dir = normalise(sub(clampedTarget, anchorWorld));
+  // Move the target into torso-local space so the solver can use
+  // `anchor` (torso-local) directly.
+  const localTarget = worldToTorsoLocal(target, torsoRoot, torsoRotation);
+  const clampedTarget = clampTargetToReach(anchor, localTarget, reach);
+  const clamped = clampedTarget !== localTarget;
+
+  const dir = normalise(sub(clampedTarget, anchor));
   const rest = REST_DIRECTION[part];
   const rotation = directionToEuler(rest, dir);
   return { rotation, clamped };
+}
+
+/**
+ * Face-forward head look. The head's "face direction" is local +Z;
+ * solving routes a target through yaw (local Y) + pitch (local X).
+ * Clamps to sensible human limits so you can't spin a head 180°.
+ *
+ * report06 #2 — before this, headLook went through solveLimbIK, which
+ * mapped "target to the right" into local Z roll (a sideways head
+ * tilt) instead of a Y yaw.
+ */
+export function solveHeadLook(
+  target: Vec3,
+  torsoRoot: Vec3 = { x: 0, y: 0, z: 0 },
+  torsoRotation: Vec3 = { x: 0, y: 0, z: 0 }
+): LimbSolveResult {
+  const anchor = JOINT_ANCHORS.head;
+  const localTarget = worldToTorsoLocal(target, torsoRoot, torsoRotation);
+  const dir = normalise(sub(localTarget, anchor));
+  if (length(dir) < 1e-9) {
+    return { rotation: { x: 0, y: 0, z: 0 }, clamped: false };
+  }
+  // yaw around +Y: in Three.js right-handed rotation, head.y = +90°
+  // rotates the face direction from +Z to +X (character's right).
+  // So for a target in +X we want yaw = +90° → atan2(dir.x, dir.z).
+  const yaw = Math.atan2(dir.x, dir.z);
+  // pitch around +X: positive pitch tilts face DOWN (consistent with
+  // head.x=+25 = chin down from the system prompt).
+  const horizontalLength = Math.sqrt(dir.x * dir.x + dir.z * dir.z);
+  const pitch = Math.atan2(-dir.y, horizontalLength);
+
+  const yawDeg = clampTo(radToDeg(yaw), 80);
+  const pitchDeg = clampTo(radToDeg(pitch), 60);
+  const clamped =
+    yawDeg !== radToDeg(yaw) || pitchDeg !== radToDeg(pitch);
+  return {
+    rotation: { x: pitchDeg, y: yawDeg, z: 0 },
+    clamped,
+  };
 }
 
 export interface SolveResult {
@@ -127,8 +173,9 @@ export interface SolveResult {
 }
 
 /**
- * Solve a full pose from a map of IK targets. Starts from `basePose`
- * so joints that have no target keep their current rotation.
+ * Solve a full pose from a map of IK targets. Only the handles present
+ * in `targets` are touched, so the caller can bake a single hand without
+ * overwriting untouched joints (report06 #1).
  */
 export function solveIKPose(
   basePose: R6Pose,
@@ -136,14 +183,23 @@ export function solveIKPose(
 ): SolveResult {
   const pose = clonePose(basePose);
   const torsoRoot = pose.torso.position || { x: 0, y: 0, z: 0 };
+  const torsoRotation = pose.torso.rotation;
   const clamped: Partial<Record<IKHandleName, boolean>> = {};
 
   for (const handle of Object.keys(targets) as IKHandleName[]) {
     const target = targets[handle];
     if (!target) continue;
-    const part = IK_HANDLE_TO_PART[handle];
-    const result = solveLimbIK(part, target, torsoRoot);
-    // Guard against NaN / Infinity from degenerate targets.
+
+    const result =
+      handle === 'headLook'
+        ? solveHeadLook(target, torsoRoot, torsoRotation)
+        : solveLimbIK(
+            IK_HANDLE_TO_PART[handle],
+            target,
+            torsoRoot,
+            torsoRotation
+          );
+
     if (
       !Number.isFinite(result.rotation.x) ||
       !Number.isFinite(result.rotation.y) ||
@@ -151,6 +207,7 @@ export function solveIKPose(
     ) {
       continue;
     }
+    const part = IK_HANDLE_TO_PART[handle];
     pose[part] = { ...pose[part], rotation: result.rotation };
     if (result.clamped) clamped[handle] = true;
   }
@@ -161,11 +218,8 @@ export function solveIKPose(
  * Torso-translation compensation: given a set of pinned targets
  * (feet, hands) and the current rig root, find a root translation that
  * reduces drift between the pinned targets and their reachable limb tips.
- *
  * V1 implementation: average the deltas between each pinned target's
- * anchor in world and the current anchor position, and apply as a
- * translation. Simple, not exact, but enough to keep a pinned foot
- * on the ground while the torso moves slightly.
+ * neutral anchor-tip and its actual target, and apply as a translation.
  */
 export function compensateTorso(
   currentRoot: Vec3,
@@ -179,7 +233,6 @@ export function compensateTorso(
       const anchorLocal = JOINT_ANCHORS[part];
       const rest = REST_DIRECTION[part];
       const reach = LIMB_LENGTHS[part];
-      // Where the anchor would need to be so the rest-pose tip lands on target.
       return {
         x: target.x - (anchorLocal.x + rest.x * reach),
         y: target.y - (anchorLocal.y + rest.y * reach),

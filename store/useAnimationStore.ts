@@ -75,6 +75,12 @@ interface AnimationState extends PlaybackState {
   setEditMode: (mode: EditMode) => void;
 
   ikTargets: Record<IKHandleName, Vec3>;
+  /**
+   * Handles the user has actually touched since last reset. Bake only
+   * solves these, so tweaking one hand can't reset an untouched head or
+   * leg (report06 #1).
+   */
+  activeIkHandles: Set<IKHandleName>;
   setIkTarget: (handle: IKHandleName, position: Vec3) => void;
   resetIkTargets: () => void;
   bakeIkToCurrentFrame: () => void;
@@ -120,6 +126,7 @@ export const useAnimationStore = create<AnimationState>((set, get) => ({
   gizmoMode: 'rotate',
   editMode: 'fk',
   ikTargets: defaultIKTargets(),
+  activeIkHandles: new Set<IKHandleName>(),
   history: [],
   future: [],
 
@@ -295,12 +302,31 @@ export const useAnimationStore = create<AnimationState>((set, get) => ({
   setEditMode: (mode) => set({ editMode: mode }),
 
   setIkTarget: (handle, position) => {
-    set((state) => ({
-      ikTargets: { ...state.ikTargets, [handle]: { ...position } },
-    }));
+    set((state) => {
+      const nextActive = new Set(state.activeIkHandles);
+      nextActive.add(handle);
+      return {
+        ikTargets: { ...state.ikTargets, [handle]: { ...position } },
+        activeIkHandles: nextActive,
+      };
+    });
   },
 
-  resetIkTargets: () => set({ ikTargets: defaultIKTargets() }),
+  resetIkTargets: () => {
+    set((state) => {
+      // report06 #3: seed from the CURRENT frame's torso position so a
+      // moved/jumped/crouched torso doesn't reset to world-origin targets.
+      const frame = Math.round(state.currentFrame);
+      const basePose =
+        state.keyframes.find((kf) => kf.frame === frame)?.pose ||
+        interpolatePose(state.keyframes, frame);
+      const torsoRoot = basePose.torso.position || { x: 0, y: 0, z: 0 };
+      return {
+        ikTargets: defaultIKTargets(torsoRoot),
+        activeIkHandles: new Set<IKHandleName>(),
+      };
+    });
+  },
 
   bakeIkToCurrentFrame: () => {
     set((state) => {
@@ -308,9 +334,16 @@ export const useAnimationStore = create<AnimationState>((set, get) => ({
       const basePose =
         state.keyframes.find((kf) => kf.frame === frame)?.pose ||
         interpolatePose(state.keyframes, frame);
+      // report06 #1: only solve the handles the user actually touched,
+      // so baking one hand can't clobber untouched joints.
       const targetMap: Partial<Record<IKHandleName, Vec3>> = {};
       for (const h of IK_HANDLES) {
-        targetMap[h] = state.ikTargets[h];
+        if (state.activeIkHandles.has(h)) {
+          targetMap[h] = state.ikTargets[h];
+        }
+      }
+      if (Object.keys(targetMap).length === 0) {
+        return {};
       }
       const { pose: solved } = solveIKPose(basePose, targetMap);
       const history = [...state.history, snapshot(state)].slice(-HISTORY_CAP);

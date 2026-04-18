@@ -48,6 +48,7 @@ export function Controls() {
     editMode,
     setEditMode,
     ikTargets,
+    activeIkHandles,
     setIkTarget,
     resetIkTargets,
     bakeIkToCurrentFrame,
@@ -197,14 +198,35 @@ export function Controls() {
               </button>
               <button
                 onClick={bakeIkToCurrentFrame}
-                className="px-2 py-0.5 text-[10px] bg-cyan-600 hover:bg-cyan-700 text-white rounded transition"
+                disabled={activeIkHandles.size === 0}
+                title={
+                  activeIkHandles.size === 0
+                    ? 'Edit a target to arm the bake'
+                    : `Bake ${activeIkHandles.size} handle(s)`
+                }
+                className="px-2 py-0.5 text-[10px] bg-cyan-600 hover:bg-cyan-700 disabled:bg-[#222] disabled:text-gray-500 disabled:cursor-not-allowed text-white rounded transition"
               >
-                Bake
+                Bake{activeIkHandles.size ? ` (${activeIkHandles.size})` : ''}
               </button>
             </div>
           </div>
           {IK_HANDLES.map((h) => (
-            <div key={h} className="flex items-center gap-1 text-[10px]">
+            <div
+              key={h}
+              className={`flex items-center gap-1 text-[10px] ${
+                activeIkHandles.has(h) ? '' : 'opacity-60'
+              }`}
+              title={
+                activeIkHandles.has(h)
+                  ? 'Will be solved on next Bake'
+                  : 'Untouched — bake skips this handle'
+              }
+            >
+              <span
+                className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                  activeIkHandles.has(h) ? 'bg-cyan-400' : 'bg-gray-700'
+                }`}
+              />
               <span className="text-gray-400 w-16">{IK_LABELS[h]}</span>
               {(['x', 'y', 'z'] as const).map((axis) => (
                 <input

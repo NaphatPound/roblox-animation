@@ -1,5 +1,6 @@
 import {
   clamp,
+  conjugateQuaternion,
   degToRad,
   radToDeg,
   lerp,
@@ -8,6 +9,7 @@ import {
   eulerToQuaternion,
   quaternionToEuler,
   normalizeQuaternion,
+  rotateVec3,
   slerp,
   slerpEuler,
   generateId,
@@ -163,6 +165,40 @@ describe('mathUtils', () => {
     it('returns unique string ids', () => {
       const ids = new Set(Array.from({ length: 50 }, () => generateId()));
       expect(ids.size).toBe(50);
+    });
+  });
+
+  describe('conjugateQuaternion', () => {
+    it('flips the sign of xyz and preserves w', () => {
+      const q = conjugateQuaternion({ x: 0.3, y: -0.4, z: 0.5, w: 0.7 });
+      expect(q).toEqual({ x: -0.3, y: 0.4, z: -0.5, w: 0.7 });
+    });
+  });
+
+  describe('rotateVec3', () => {
+    it('identity quaternion leaves the vector unchanged', () => {
+      const v = rotateVec3({ x: 1, y: 2, z: 3 }, { x: 0, y: 0, z: 0, w: 1 });
+      expect(v.x).toBeCloseTo(1, 5);
+      expect(v.y).toBeCloseTo(2, 5);
+      expect(v.z).toBeCloseTo(3, 5);
+    });
+
+    it('rotating +X by 90° around +Y yields -Z', () => {
+      const q = eulerToQuaternion({ x: 0, y: 90, z: 0 });
+      const v = rotateVec3({ x: 1, y: 0, z: 0 }, q);
+      expect(v.x).toBeCloseTo(0, 5);
+      expect(v.z).toBeCloseTo(-1, 5);
+    });
+
+    it('rotating by a quaternion and its conjugate round-trips to identity', () => {
+      const q = eulerToQuaternion({ x: 30, y: 45, z: -20 });
+      const qInv = conjugateQuaternion(q);
+      const v = { x: 1.5, y: -0.3, z: 2.1 };
+      const rotated = rotateVec3(v, q);
+      const back = rotateVec3(rotated, qInv);
+      expect(back.x).toBeCloseTo(v.x, 5);
+      expect(back.y).toBeCloseTo(v.y, 5);
+      expect(back.z).toBeCloseTo(v.z, 5);
     });
   });
 });

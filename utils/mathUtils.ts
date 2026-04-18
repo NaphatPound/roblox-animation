@@ -146,3 +146,28 @@ export function slerpEuler(a: Vec3, b: Vec3, t: number): Vec3 {
 export function generateId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
 }
+
+export function conjugateQuaternion(q: QuaternionData): QuaternionData {
+  return { x: -q.x, y: -q.y, z: -q.z, w: q.w };
+}
+
+/**
+ * Rotate a 3-vector by a unit quaternion using v' = q * v * q⁻¹.
+ * Used to push an IK target into or out of a rotated parent's frame
+ * (e.g. torso-local space when the torso is twisted).
+ */
+export function rotateVec3(v: Vec3, q: QuaternionData): Vec3 {
+  const qn = normalizeQuaternion(q);
+  // v' = q * v * q_conj
+  // Using quaternion-vector shortcut:
+  //   t = 2 * cross(q.xyz, v)
+  //   v' = v + q.w * t + cross(q.xyz, t)
+  const tx = 2 * (qn.y * v.z - qn.z * v.y);
+  const ty = 2 * (qn.z * v.x - qn.x * v.z);
+  const tz = 2 * (qn.x * v.y - qn.y * v.x);
+  return {
+    x: v.x + qn.w * tx + (qn.y * tz - qn.z * ty),
+    y: v.y + qn.w * ty + (qn.z * tx - qn.x * tz),
+    z: v.z + qn.w * tz + (qn.x * ty - qn.y * tx),
+  };
+}
