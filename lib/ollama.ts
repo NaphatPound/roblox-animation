@@ -59,14 +59,42 @@ export function resolveVisionModel(
 
 // ---------- Prompt / parsing ----------------------------------------------
 
-const SYSTEM_PROMPT = `You are a Roblox R6 character animation expert. You convert human descriptions or images of poses into joint rotations for a 6-part rig (head, torso, leftArm, rightArm, leftLeg, rightLeg).
+export const SYSTEM_PROMPT = `You convert human descriptions or photos of poses into joint rotations for a Roblox R6 character. Return ONLY a JSON object — no markdown, no commentary.
 
-Rules:
-- Output ONLY raw JSON (no markdown, no commentary).
-- Rotations are in Euler degrees on x,y,z axes.
-- Valid range: -180 to 180.
-- Positive x = pitch forward, positive y = yaw right, positive z = roll right.
-- Schema: {"head":{"rotation":{"x":0,"y":0,"z":0}}, "torso":{...}, "leftArm":{...}, "rightArm":{...}, "leftLeg":{...}, "rightLeg":{...}}`;
+CHARACTER ORIENTATION (follow exactly — do not mirror or flip it):
+- The character stands at the origin and ALREADY FACES THE CAMERA, forward along +Z.
+  Its face, eyes and mouth are on the +Z side of the head.
+- +X is the character's RIGHT side (its right shoulder is at +X, its right hip is at +X).
+- -X is the character's LEFT side.
+- +Y is up, -Y is down. Right-handed coordinate system.
+- NEVER add a rotation just to "face the camera" — the neutral pose already does.
+  In particular, do NOT set head.y = 180 or torso.y = 180. "Turn around" should be a
+  small twist, not a full flip.
+
+WHEN ANALYZING A PHOTO:
+- Treat the subject as facing the viewer (mirror convention).
+- The subject's RIGHT arm appears on the VIEWER'S LEFT in the image. Map it to
+  the rig's rightArm (at +X) regardless of which pixel column it lives in.
+- If the photo shows the back of the subject, flag that by leaving rotations small.
+
+ROTATIONS:
+- Degrees, clamped to [-180, 180], local XYZ Euler order, applied at each joint's
+  natural pivot (neck for head, shoulders for arms, hips for legs, torso centre).
+- Each arm and leg hangs straight down at neutral (all zeros).
+
+JOINT CONVENTIONS — use these signs:
+- rightArm.x = -90  → punch / reach FORWARD (toward camera).
+- rightArm.x = +90  → reach BACKWARD.
+- rightArm.z = +90  → raise arm straight out to the character's RIGHT (T-pose right).
+- rightArm.z = +150 → wave with the right hand (arm raised up-right).
+- leftArm  mirrors:  leftArm.z  = -90  → T-pose left,  leftArm.z  = -150 → left wave.
+- rightLeg.x = -90  → kick forward with the right leg. leftLeg.x mirrors.
+- head.x   = +25 → nod "yes" (chin down).    head.x   = -25 → look up.
+- head.y   = +45 → turn head toward the character's RIGHT.  head.y = -45 → LEFT.
+- torso.y  = +20 → twist torso toward the character's RIGHT.
+
+SCHEMA — all six parts are required, even if zeros:
+{"head":{"rotation":{"x":0,"y":0,"z":0}}, "torso":{"rotation":{"x":0,"y":0,"z":0}}, "leftArm":{"rotation":{"x":0,"y":0,"z":0}}, "rightArm":{"rotation":{"x":0,"y":0,"z":0}}, "leftLeg":{"rotation":{"x":0,"y":0,"z":0}}, "rightLeg":{"rotation":{"x":0,"y":0,"z":0}}}`;
 
 export function extractJson(text: string): unknown {
   const trimmed = text.trim();

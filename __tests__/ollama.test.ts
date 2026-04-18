@@ -1,7 +1,8 @@
 import {
   extractJson,
-  normalizePose,
   fallbackPoseFromPrompt,
+  normalizePose,
+  SYSTEM_PROMPT,
 } from '../lib/ollama';
 
 describe('extractJson', () => {
@@ -109,5 +110,33 @@ describe('fallbackPoseFromPrompt', () => {
     const pose = fallbackPoseFromPrompt('foobar');
     expect(pose.head.rotation).toEqual({ x: 0, y: 0, z: 0 });
     expect(pose.rightArm.rotation).toEqual({ x: 0, y: 0, z: 0 });
+  });
+});
+
+describe('SYSTEM_PROMPT (character facing direction)', () => {
+  it('states the character faces +Z toward the camera', () => {
+    expect(SYSTEM_PROMPT).toMatch(/\+Z/);
+    expect(SYSTEM_PROMPT.toLowerCase()).toMatch(/faces the camera|facing the camera/);
+  });
+
+  it('maps +X to character RIGHT and -X to character LEFT', () => {
+    // The AI is grounded in anatomical convention; the rig agrees.
+    expect(SYSTEM_PROMPT).toMatch(/\+X.*RIGHT/);
+    expect(SYSTEM_PROMPT).toMatch(/-X.*LEFT/);
+  });
+
+  it('explicitly forbids adding a 180° turn just to face the camera', () => {
+    expect(SYSTEM_PROMPT.toLowerCase()).toMatch(/180/);
+    expect(SYSTEM_PROMPT.toLowerCase()).toMatch(/do not set head\.y = 180/i);
+  });
+
+  it('warns about mirror convention when analyzing a photo', () => {
+    expect(SYSTEM_PROMPT.toLowerCase()).toMatch(/viewer.?s left/);
+  });
+
+  it('lists all six parts as required in the schema', () => {
+    for (const part of ['head', 'torso', 'leftArm', 'rightArm', 'leftLeg', 'rightLeg']) {
+      expect(SYSTEM_PROMPT).toContain(part);
+    }
   });
 });

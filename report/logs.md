@@ -326,6 +326,25 @@ This file tracks features, bugs, fixes, and updates to the Roblox R6 AI Animator
 - `npx tsc --noEmit` → 0 errors.
 - `npx next build` → OK.
 
+---
+
+### [BUGFIX] AI system prompt now specifies character facing direction
+- Symptom (reported by user in Thai): "ต้องส่งว่าตัวละครกำลังหันหน้าไปทางไหนไปให้ ollama ด้วยเพราะว่าตอนนี้เหมือนสลับด้าน หัวและหน้าตัวละครจะหันไปด้สนหลังเสมอ" — AI-generated poses often left the character's head/face pointing backward, because the system prompt never told the AI which way the neutral rig already faces.
+- Root cause: the old `SYSTEM_PROMPT` only described axis conventions ("+x pitch forward, +y yaw right"), not orientation. The AI was free to add a 180° yaw to "make the character face the camera", which broke poses that in fact assumed neutral = facing camera.
+- Fix: rewrote `SYSTEM_PROMPT` in `lib/ollama.ts` to explicitly state:
+  - **Character already faces +Z toward the camera.** Face, eyes, mouth are on the +Z side. Do NOT set `head.y = 180` or `torso.y = 180`.
+  - +X is the character's RIGHT, -X is LEFT. Right shoulder is at +X.
+  - Photo-analysis convention: subject is mirror-facing the viewer — subject's right arm appears on the viewer's left in the image. Map to the rig's `rightArm` (+X) regardless.
+  - Added concrete sign examples (punch = rightArm.x=-90, wave = rightArm.z=+150, T-pose = leftArm.z=-90 / rightArm.z=+90, nod = head.x=+25, etc.) so the AI has ground truth instead of guessing signs.
+- Exported `SYSTEM_PROMPT` so a test can pin the key constraints.
+- New tests in `__tests__/ollama.test.ts` assert the prompt mentions +Z / +X-right / -X-left / the 180° ban / the viewer-mirror convention, and lists all six parts.
+
+### [TEST RESULT] Live cloud check of the new prompt
+- `POST /api/ai-text {prompt:"wave hello with the right hand"}` → `rightArm.z=150` (matches our right-wave preset exactly; no head rotation).
+- `POST /api/ai-text {prompt:"look over the right shoulder"}` → `head.y=45` (tasteful turn, not a 180° flip — this was the regression the user hit).
+- `POST /api/ai-text {prompt:"military salute with the right hand"}` → `rightArm.x=-90` (arm swings forward from the right shoulder; head stays forward).
+- `npx jest` → 9 suites, 163 tests passing (5 new for the prompt contract).
+
 ### [BUGFIX] In-between frames didn't interpolate position when one side was unset
 - Symptom (reported by user): tweening a moved-and-rotated joint, the rotation LERPed but position snapped to whichever keyframe had the offset set — "cal only rotate".
 - Root cause: `interpolatePose` in `components/3d/InterpolationEngine.ts` only LERPed `position` when **both** keyframes had one, and otherwise fell back to `from.position || to.position` — a pure snap, not a blend. That is fine when both keyframes set a value, but falls over once the user uses the Move gizmo only on one keyframe (which is the normal case: the initial keyframe has no `position` set, the user adds one at frame 30).
