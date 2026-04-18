@@ -4,8 +4,18 @@ import { useEffect } from 'react';
 import { useAnimationStore } from '@/store/useAnimationStore';
 import { interpolatePose } from '@/components/3d/InterpolationEngine';
 import { POSE_PRESETS, PRESET_ORDER } from '@/lib/presets';
+import { IK_HANDLES } from '@/lib/rig/r6Rig';
 import type { R6PartName } from '@/types';
-import { Move3D, Rotate3D, RotateCcw, Shapes } from 'lucide-react';
+import {
+  FlipHorizontal,
+  Move3D,
+  Rotate3D,
+  RotateCcw,
+  Shapes,
+  Undo2,
+  Redo2,
+  Target,
+} from 'lucide-react';
 
 const PART_LABELS: Record<R6PartName, string> = {
   head: 'Head',
@@ -35,6 +45,17 @@ export function Controls() {
     addKeyframe,
     gizmoMode,
     setGizmoMode,
+    editMode,
+    setEditMode,
+    ikTargets,
+    setIkTarget,
+    resetIkTargets,
+    bakeIkToCurrentFrame,
+    mirrorCurrentKeyframe,
+    undo,
+    redo,
+    history,
+    future,
   } = useAnimationStore();
 
   useEffect(() => {
@@ -48,15 +69,28 @@ export function Controls() {
       ) {
         return;
       }
+      const ctrl = e.ctrlKey || e.metaKey;
+      if (ctrl && (e.key === 'z' || e.key === 'Z')) {
+        e.preventDefault();
+        if (e.shiftKey) redo();
+        else undo();
+        return;
+      }
+      if (ctrl && (e.key === 'y' || e.key === 'Y')) {
+        e.preventDefault();
+        redo();
+        return;
+      }
       if (e.key === 'r' || e.key === 'R') setGizmoMode('rotate');
       if (e.key === 't' || e.key === 'T' || e.key === 'g' || e.key === 'G') {
         setGizmoMode('translate');
       }
+      if (e.key === 'm' || e.key === 'M') mirrorCurrentKeyframe();
       if (e.key === 'Escape') selectPart(null);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [setGizmoMode, selectPart]);
+  }, [setGizmoMode, selectPart, undo, redo, mirrorCurrentKeyframe]);
 
   // report05 #3: sample pose and edit at the same rounded frame. A
   // fractional currentFrame during playback would otherwise make the
@@ -87,8 +121,111 @@ export function Controls() {
     addKeyframe(roundedFrame, factory());
   };
 
+  const IK_LABELS: Record<(typeof IK_HANDLES)[number], string> = {
+    leftHand: 'Left Hand',
+    rightHand: 'Right Hand',
+    leftFoot: 'Left Foot',
+    rightFoot: 'Right Foot',
+    headLook: 'Head Look',
+  };
+
   return (
     <div className="flex flex-col gap-3 p-4 bg-[#111] border border-[#2a2a2a] rounded">
+      <div className="flex items-center gap-2">
+        <button
+          onClick={undo}
+          disabled={history.length === 0}
+          title="Undo (Ctrl+Z)"
+          className="flex items-center gap-1 px-2 py-1 text-xs bg-[#0a0a0a] text-gray-300 hover:bg-[#222] disabled:opacity-40 disabled:cursor-not-allowed rounded transition"
+        >
+          <Undo2 size={12} /> Undo
+        </button>
+        <button
+          onClick={redo}
+          disabled={future.length === 0}
+          title="Redo (Ctrl+Shift+Z / Ctrl+Y)"
+          className="flex items-center gap-1 px-2 py-1 text-xs bg-[#0a0a0a] text-gray-300 hover:bg-[#222] disabled:opacity-40 disabled:cursor-not-allowed rounded transition"
+        >
+          <Redo2 size={12} /> Redo
+        </button>
+        <div className="flex-1" />
+        <button
+          onClick={mirrorCurrentKeyframe}
+          title="Mirror current keyframe left ↔ right (M)"
+          className="flex items-center gap-1 px-2 py-1 text-xs bg-[#0a0a0a] text-gray-300 hover:bg-purple-600 hover:text-white rounded transition"
+        >
+          <FlipHorizontal size={12} /> Mirror
+        </button>
+      </div>
+
+      <div className="flex items-center gap-2 border-t border-[#2a2a2a] pt-2">
+        <span className="text-xs text-gray-400">Mode</span>
+        <button
+          onClick={() => setEditMode('fk')}
+          className={`px-2 py-1 text-xs rounded transition ${
+            editMode === 'fk'
+              ? 'bg-blue-500 text-white'
+              : 'bg-[#0a0a0a] text-gray-300 hover:bg-[#222]'
+          }`}
+        >
+          FK
+        </button>
+        <button
+          onClick={() => setEditMode('ik')}
+          className={`px-2 py-1 text-xs rounded transition ${
+            editMode === 'ik'
+              ? 'bg-blue-500 text-white'
+              : 'bg-[#0a0a0a] text-gray-300 hover:bg-[#222]'
+          }`}
+        >
+          IK
+        </button>
+      </div>
+
+      {editMode === 'ik' && (
+        <div className="flex flex-col gap-2 border border-[#2a2a2a] p-2 rounded bg-[#0a0a0a]">
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-semibold text-white flex items-center gap-1">
+              <Target size={12} className="text-cyan-400" /> IK Targets
+            </label>
+            <div className="flex gap-1">
+              <button
+                onClick={resetIkTargets}
+                className="px-2 py-0.5 text-[10px] bg-[#0a0a0a] border border-[#333] text-gray-400 hover:bg-[#222] rounded transition"
+              >
+                Reset
+              </button>
+              <button
+                onClick={bakeIkToCurrentFrame}
+                className="px-2 py-0.5 text-[10px] bg-cyan-600 hover:bg-cyan-700 text-white rounded transition"
+              >
+                Bake
+              </button>
+            </div>
+          </div>
+          {IK_HANDLES.map((h) => (
+            <div key={h} className="flex items-center gap-1 text-[10px]">
+              <span className="text-gray-400 w-16">{IK_LABELS[h]}</span>
+              {(['x', 'y', 'z'] as const).map((axis) => (
+                <input
+                  key={axis}
+                  type="number"
+                  step={0.1}
+                  value={Number(ikTargets[h][axis].toFixed(2))}
+                  onChange={(e) =>
+                    setIkTarget(h, {
+                      ...ikTargets[h],
+                      [axis]: Number(e.target.value),
+                    })
+                  }
+                  className="w-12 px-1 py-0.5 bg-[#111] border border-[#333] rounded text-white"
+                />
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+
       <label className="text-sm font-semibold text-white flex items-center gap-2">
         <Shapes size={14} className="text-green-400" />
         Pose Presets

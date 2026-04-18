@@ -44,6 +44,8 @@ export type EasingType = 'linear' | 'easeIn' | 'easeOut' | 'easeInOut';
 
 export type GizmoMode = 'rotate' | 'translate';
 
+export type EditMode = 'fk' | 'ik';
+
 export interface AnimationClip {
   name: string;
   duration: number;

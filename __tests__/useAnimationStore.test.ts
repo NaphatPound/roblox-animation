@@ -15,6 +15,9 @@ function resetStore() {
     speed: 1,
     selectedPart: null,
     gizmoMode: 'rotate',
+    editMode: 'fk',
+    history: [],
+    future: [],
   });
 }
 
@@ -251,6 +254,94 @@ describe('useAnimationStore', () => {
     expect(kf!.pose.rightArm.position).toEqual({ x: 0.5, y: 0, z: 0 });
     // other parts should stay at their default (no position set).
     expect(kf!.pose.leftArm.position).toBeUndefined();
+  });
+
+  describe('undo/redo', () => {
+    it('undo restores the prior keyframes array', () => {
+      useAnimationStore.getState().clearKeyframes();
+      useAnimationStore.getState().addKeyframe(10, DEFAULT_POSE);
+      expect(
+        useAnimationStore.getState().keyframes.some((k) => k.frame === 10)
+      ).toBe(true);
+      useAnimationStore.getState().undo();
+      expect(
+        useAnimationStore.getState().keyframes.some((k) => k.frame === 10)
+      ).toBe(false);
+    });
+
+    it('redo re-applies the undone change', () => {
+      useAnimationStore.getState().clearKeyframes();
+      useAnimationStore.getState().addKeyframe(10, DEFAULT_POSE);
+      useAnimationStore.getState().undo();
+      useAnimationStore.getState().redo();
+      expect(
+        useAnimationStore.getState().keyframes.some((k) => k.frame === 10)
+      ).toBe(true);
+    });
+
+    it('does nothing when history / future are empty', () => {
+      useAnimationStore.setState({ history: [], future: [] });
+      const before = useAnimationStore.getState().keyframes;
+      useAnimationStore.getState().undo();
+      useAnimationStore.getState().redo();
+      expect(useAnimationStore.getState().keyframes).toBe(before);
+    });
+
+    it('a new mutation clears the redo stack', () => {
+      useAnimationStore.getState().clearKeyframes();
+      useAnimationStore.getState().addKeyframe(5, DEFAULT_POSE);
+      useAnimationStore.getState().undo();
+      expect(useAnimationStore.getState().future.length).toBe(1);
+      useAnimationStore.getState().addKeyframe(20, DEFAULT_POSE);
+      expect(useAnimationStore.getState().future.length).toBe(0);
+    });
+
+    it('caps history length to HISTORY_CAP snapshots', () => {
+      useAnimationStore.getState().clearKeyframes();
+      for (let i = 1; i <= 60; i++) {
+        useAnimationStore.getState().addKeyframe(i, DEFAULT_POSE);
+      }
+      expect(useAnimationStore.getState().history.length).toBeLessThanOrEqual(
+        50
+      );
+    });
+  });
+
+  describe('mirrorCurrentKeyframe', () => {
+    it('swaps left/right arm rotations on the keyframe at the current frame', () => {
+      useAnimationStore.getState().clearKeyframes();
+      const punch = clonePose(DEFAULT_POSE);
+      punch.rightArm.rotation = { x: -90, y: 0, z: 0 };
+      useAnimationStore.getState().addKeyframe(10, punch);
+      useAnimationStore.getState().setCurrentFrame(10);
+      useAnimationStore.getState().mirrorCurrentKeyframe();
+      const kf = useAnimationStore
+        .getState()
+        .keyframes.find((k) => k.frame === 10);
+      expect(kf!.pose.leftArm.rotation).toEqual({ x: -90, y: 0, z: 0 });
+      expect(kf!.pose.rightArm.rotation).toEqual({ x: 0, y: 0, z: 0 });
+    });
+  });
+
+  describe('bakeIkToCurrentFrame', () => {
+    it('solves the right hand target and writes a keyframe', () => {
+      useAnimationStore.getState().clearKeyframes();
+      useAnimationStore.getState().setCurrentFrame(5);
+      // Move right hand 2 studs outward (character's right).
+      const defaults = useAnimationStore.getState().ikTargets;
+      useAnimationStore.getState().setIkTarget('rightHand', {
+        x: defaults.rightHand.x + 2,
+        y: defaults.rightHand.y + 2,
+        z: defaults.rightHand.z,
+      });
+      useAnimationStore.getState().bakeIkToCurrentFrame();
+      const kf = useAnimationStore
+        .getState()
+        .keyframes.find((k) => k.frame === 5);
+      expect(kf).toBeDefined();
+      // Solver raised the right arm outward — z should be positive (character-right).
+      expect(kf!.pose.rightArm.rotation.z).toBeGreaterThan(0);
+    });
   });
 
   describe('moveKeyframe (regression: report05 #4)', () => {

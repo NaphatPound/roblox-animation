@@ -51,12 +51,13 @@ This plan outlines the development phases and specific tasks required to build t
 - [x] Implement Export feature:
     - [x] Export as Roblox-compatible Keyframe sequence (JSON).
 - [x] Final testing and performance optimization for the 3D canvas.
-- [ ] Implement Inverse Kinematics (IK) for limbs.
-- [ ] Add Undo/Redo support.
+- [x] Implement Inverse Kinematics (IK) for limbs — one-bone R6 IK assist (arms, legs, head-look) with reach clamping + torso translation compensation; FK/IK mode toggle, `Bake IK` writes the solved pose to the current keyframe, `Mirror Pose` swaps L↔R across the sagittal plane. See `lib/rig/`.
+- [x] Add Undo/Redo support — 50-snapshot history stack wraps every pose-mutating action (addKeyframe, removeKeyframe, moveKeyframe, updatePartRotation/Position, setTotalFrames, clearKeyframes, bakeIK, mirror); Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y shortcuts; toolbar buttons.
 
 ---
 
 ## 🛠️ Immediate Tasks (Next Steps)
-1. Implement Inverse Kinematics (IK) for more natural posing.
-2. Add Undo/Redo functionality to the animation store.
-3. Enhance Export/Import to support Roblox XML format.
+1. ~~Implement Inverse Kinematics (IK)~~ — done.
+2. ~~Add Undo/Redo~~ — done.
+3. Enhance Export/Import to support Roblox KeyframeSequence XML format (current export is a custom JSON clip; Roblox Studio import would need XML-serialised KeyframeSequence).
+4. Optional: viewport IK effector gizmos (task01 Phase 3). V1 uses numeric inputs + the existing rotate/translate gizmos on body parts.

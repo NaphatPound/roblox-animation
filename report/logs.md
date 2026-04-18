@@ -376,6 +376,39 @@ This file tracks features, bugs, fixes, and updates to the Roblox R6 AI Animator
 - `npx tsc --noEmit` → 0 errors.
 - `npx next build` → OK.
 
+---
+
+### [FEATURE] Phase 6 wrap-up — R6 IK assist + Undo/Redo
+- Completed the two remaining items in `document/plan.md` Phase 6 and marked the plan accordingly.
+
+#### Inverse Kinematics (task01)
+- New `lib/rig/r6Rig.ts` — joint anchors, limb lengths, rest directions, IK-handle → body-part map, and `defaultIKTargets(root)` that seeds neutral target positions.
+- New `lib/rig/r6IkSolver.ts`:
+  - `directionToEuler(from, to)` — solves a single-bone rotation from a rest direction onto a target direction, returning Euler degrees (XYZ). Uses `-b.y || 0` / `b.y || 0` to neutralise JS's `Math.atan2(0, -0) === π` quirk.
+  - `solveLimbIK(part, target, root)` — clamps unreachable targets to limb length, reports `clamped: boolean`.
+  - `solveIKPose(base, targets)` — full-pose solve that only overwrites joints whose handles were provided, preserving untouched rotations.
+  - `compensateTorso(root, pinnedTargets)` — V1 translation-only torso compensation by averaging the deltas from pinned targets to their neutral anchor positions.
+- New `lib/rig/mirrorPose.ts` — swaps leftArm↔rightArm, leftLeg↔rightLeg, inverts yaw (y) and roll (z) on head/torso, keeps forward pitch (x). `flip(n)` avoids `-0` leaks into keyframe comparisons.
+- Store additions in `store/useAnimationStore.ts`: `editMode: 'fk' | 'ik'`, `ikTargets: Record<IKHandleName, Vec3>`, `setIkTarget`, `resetIkTargets`, `bakeIkToCurrentFrame`, `mirrorCurrentKeyframe`.
+- UI additions in `components/ui/Controls.tsx`:
+  - FK / IK mode toggle.
+  - IK Targets panel (shown only in IK mode) with X/Y/Z number inputs for each handle + `Reset` + `Bake` buttons.
+  - `Mirror` button (also bound to keyboard `M`).
+- Tests: `__tests__/r6IkSolver.test.ts` (9 cases — direction, reach clamp, NaN safety, partial-pose solve, torso compensation), `__tests__/mirrorPose.test.ts` (6 cases — swap, yaw/roll flip, pitch preserved, position X flip, double-mirror idempotency).
+
+#### Undo / Redo
+- Store gains a `history: HistorySnapshot[]` and `future: HistorySnapshot[]` pair, capped at 50 entries. `snapshot(state)` deep-clones the keyframes array + totalFrames + fps — the three user-edited invariants.
+- Every pose-mutating action (`addKeyframe`, `removeKeyframe`, `moveKeyframe`, `clearKeyframes`, `setTotalFrames`, `updatePartRotation`, `updatePartPosition`, `bakeIkToCurrentFrame`, `mirrorCurrentKeyframe`) now pushes the prior state onto `history` and clears `future`.
+- `undo()` / `redo()` pop from one stack and push onto the other (caller's state becomes the stack item's content). Clamps `currentFrame` to the restored `totalFrames`.
+- `Controls.tsx` exposes toolbar Undo/Redo buttons (disabled when stack is empty) + keyboard shortcuts: **Ctrl+Z**, **Ctrl+Shift+Z**, **Ctrl+Y**. Shortcuts respect focused inputs/textareas.
+- Tests in `__tests__/useAnimationStore.test.ts`: undo restores, redo re-applies, empty-stack is a no-op, new mutation clears redo stack, history caps at 50.
+
+### [TEST RESULT] Phase 6 complete — 195/195 passed
+- `npx jest` → 11 suites, 195 tests (25 new across r6IkSolver, mirrorPose, and expanded useAnimationStore).
+- `npx tsc --noEmit` → 0 errors.
+- `npx next build` → OK.
+- `document/plan.md` updated: both remaining Phase 6 checkboxes (IK, Undo/Redo) are now ticked.
+
 ### [BUGFIX] In-between frames didn't interpolate position when one side was unset
 - Symptom (reported by user): tweening a moved-and-rotated joint, the rotation LERPed but position snapped to whichever keyframe had the offset set — "cal only rotate".
 - Root cause: `interpolatePose` in `components/3d/InterpolationEngine.ts` only LERPed `position` when **both** keyframes had one, and otherwise fell back to `from.position || to.position` — a pure snap, not a blend. That is fine when both keyframes set a value, but falls over once the user uses the Move gizmo only on one keyframe (which is the normal case: the initial keyframe has no `position` set, the user adds one at frame 30).
